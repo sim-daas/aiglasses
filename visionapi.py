@@ -125,18 +125,22 @@ class VisionAPI:
             
             Required JSON format:
             {{
-                "answer": "Your CONCISE response (max 10 words) or 'N/A' if information not visible",
+                "answer": "Your CONCISE response (max 10 words) - always provide your best guess",
                 "label": "Primary object name (single word or short phrase)"
             }}
             
             Rules:
             - Keep "answer" extremely brief - maximum 10 words
-            - If the requested information is not visible or determinable from the image, answer must be exactly "N/A"
-            - Do not explain why information is unavailable - just use "N/A"
+            - ALWAYS provide an answer - never use "N/A" or "unknown"
+            - If information is not clearly visible, make your best educated guess based on:
+              * Visual clues, context, typical sizes, common usage patterns
+              * Standard measurements for similar objects
+              * Most probable/common scenarios
+            - Use approximations like "~500ml", "medium size", "adult male", etc.
             - The "label" should contain only the main object/thing visible in the image (e.g., "person", "car", "dog", "book")
             - Always output valid JSON format
             - Do not include any text outside the JSON structure
-            - Be direct and factual only
+            - Be confident in your best guess - commit to an answer
             """
             
             response = self.model.generate_content([prompt, pil_image])
