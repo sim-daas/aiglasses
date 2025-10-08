@@ -119,21 +119,24 @@ class VisionAPI:
             
             # Craft prompt for structured output
             prompt = f"""
-            Analyze this image and answer the user's query. You must respond in valid JSON format with exactly these two keys:
+            Analyze this image and answer the user's query CONCISELY. You must respond in valid JSON format with exactly these two keys:
             
             User Query: {user_query}
             
             Required JSON format:
             {{
-                "answer": "Your detailed response to the user's query about what you see in the image",
+                "answer": "Your CONCISE response (max 10 words) or 'N/A' if information not visible",
                 "label": "Primary object name (single word or short phrase)"
             }}
             
             Rules:
-            - The "answer" should directly address the user's query about the image
+            - Keep "answer" extremely brief - maximum 10 words
+            - If the requested information is not visible or determinable from the image, answer must be exactly "N/A"
+            - Do not explain why information is unavailable - just use "N/A"
             - The "label" should contain only the main object/thing visible in the image (e.g., "person", "car", "dog", "book")
             - Always output valid JSON format
             - Do not include any text outside the JSON structure
+            - Be direct and factual only
             """
             
             response = self.model.generate_content([prompt, pil_image])
