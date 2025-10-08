@@ -24,8 +24,14 @@ def make_text_texture(text="HELLO 3D", size=128):
     img = Image.new("RGBA", (512, 128), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
-    w, h = draw.textsize(text, font=font)
+    
+    # Use textbbox to get width and height
+    bbox = draw.textbbox((0, 0), text, font=font)
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    
     draw.text(((512 - w) // 2, (128 - h) // 2), text, font=font, fill=(255, 255, 0, 255))
+    
     return ctx.texture(img.size, 4, img.tobytes())
 
 text_tex = make_text_texture("AI-Glasses")
