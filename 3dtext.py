@@ -95,12 +95,14 @@ class TextEffect3D:
         pos_frame.pack(fill=tk.X, pady=(0, 10))
         
         ttk.Label(pos_frame, text="X:").pack()
-        ttk.Scale(pos_frame, from_=0, to=1000, variable=self.text_x, 
-                 orient=tk.HORIZONTAL, command=self.update_image).pack(fill=tk.X)
+        self.x_scale = ttk.Scale(pos_frame, from_=0, to=1000, variable=self.text_x, 
+                               orient=tk.HORIZONTAL, command=self.update_image)
+        self.x_scale.pack(fill=tk.X)
         
         ttk.Label(pos_frame, text="Y:").pack()
-        ttk.Scale(pos_frame, from_=0, to=800, variable=self.text_y, 
-                 orient=tk.HORIZONTAL, command=self.update_image).pack(fill=tk.X)
+        self.y_scale = ttk.Scale(pos_frame, from_=0, to=800, variable=self.text_y, 
+                               orient=tk.HORIZONTAL, command=self.update_image)
+        self.y_scale.pack(fill=tk.X)
         
         # Font controls
         font_frame = ttk.LabelFrame(control_frame, text="Font")
@@ -198,6 +200,17 @@ class TextEffect3D:
             self.image_path = file_path
             self.original_image = cv2.imread(file_path)
             if self.original_image is not None:
+                # Update slider ranges based on image dimensions
+                height, width = self.original_image.shape[:2]
+                self.x_scale.config(to=width)
+                self.y_scale.config(to=height)
+                
+                # Reset position to center if current position is outside new image bounds
+                if self.text_x.get() > width:
+                    self.text_x.set(width // 2)
+                if self.text_y.get() > height:
+                    self.text_y.set(height // 2)
+                    
                 self.update_image()
             else:
                 messagebox.showerror("Error", "Could not load image")
@@ -337,8 +350,8 @@ class TextEffect3D:
         else:
             # No perspective - draw directly on overlay
             if self.enable_shadow.get():
-                shadow_x = x + self.shadow_offset_x.get()
-                shadow_y = y + self.shadow_offset_y.get()
+                shadow_x = x + actual_shadow_x
+                shadow_y = y + actual_shadow_y
                 draw.text((shadow_x, shadow_y), text, font=font, fill=shadow_color)
             
             # Depth effect - draw multiple layers for 3D illusion
@@ -589,14 +602,31 @@ class TextEffect3D:
         # Base shadow distance affected by depth
         base_distance = max(3, min(15, z_depth * 2))
         
-        # Calculate shadow offsets (opposite to relative position)
-        shadow_x = -rel_x * base_distance
-        shadow_y = -rel_y * base_distance
+        # Calculate shadow offsets (same direction as relative position)
+        shadow_x = rel_x * base_distance
+        shadow_y = rel_y * base_distance
         
         # Add some bias to make shadows more natural (light from top-left)
         shadow_x += base_distance * 0.3  # Slight right bias
         shadow_y += base_distance * 0.2  # Slight down bias
         
         return int(shadow_x), int(shadow_y)
+    
+    def run(self):
+        try:
+            self.root.mainloop()
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+            import traceback
+            traceback.print_exc()
 
-    # ...existing code...
+if __name__ == "__main__":
+    try:
+        print("Starting 3D Text Application...")
+        app = TextEffect3D()
+        print("Application created, starting main loop...")
+        app.run()
+    except Exception as e:
+        print(f"Error starting application: {e}")
+        import traceback
+        traceback.print_exc()
