@@ -244,10 +244,12 @@ class TextEffect3D:
             # Blend shadow with main image using opacity
             shadow_mask = cv2.cvtColor(shadow_layer, cv2.COLOR_BGR2GRAY) > 0
             opacity = self.shadow_opacity.get()
-            img[shadow_mask] = cv2.addWeighted(
-                img[shadow_mask], 1.0 - opacity, 
-                shadow_layer[shadow_mask], opacity, 0
-            )
+            
+            # Apply shadow using proper blending - avoid NoneType error
+            if np.any(shadow_mask) and opacity > 0:
+                # Use float conversion to prevent type errors
+                img = cv2.addWeighted(img.astype(np.float32), 1.0, 
+                                    shadow_layer.astype(np.float32), float(opacity), 0).astype(np.uint8)
         
         # Depth effect - Enhanced with proper perspective
         if self.enable_depth.get():
