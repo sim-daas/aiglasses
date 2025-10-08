@@ -13,30 +13,54 @@ A modular Python library for real-time image analysis using Google's Gemini AI a
 
 ## Installation
 
-1. **Install Python packages:**
+### Quick Setup (Recommended)
 ```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+### Manual Installation
+
+1. **Create virtual environment (recommended):**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+2. **Install packages:**
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-2. **Get Gemini API Key:**
+3. **Get Gemini API Key:**
    - Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
    - Create a new API key
    - Copy the key
 
-3. **Setup Environment Variables:**
+4. **Setup Environment Variables:**
 ```bash
 cp .env.example .env
 # Edit .env file and add your API key:
 # GEMINI_API_KEY=your_actual_api_key_here
 ```
 
+### Troubleshooting NumPy/OpenCV Compatibility
+If you encounter NumPy version conflicts:
+```bash
+pip uninstall numpy opencv-python
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
 ## Required Packages
 
-- `opencv-python==4.8.1.78` - Computer vision and webcam access
-- `google-generativeai==0.3.2` - Google Gemini AI API
-- `python-dotenv==1.0.0` - Environment variable management
-- `Pillow==10.1.0` - Image processing
-- `tk` - GUI framework (usually included with Python)
+- `numpy>=1.26.0,<2.0.0` - Numerical computing (compatible with OpenCV)
+- `opencv-python>=4.8.0,<5.0.0` - Computer vision and webcam access
+- `google-generativeai>=0.8.0` - Google Gemini AI API (latest)
+- `python-dotenv>=1.0.0` - Environment variable management
+- `Pillow>=10.0.0` - Image processing
+- `tkinter` - GUI framework (usually included with Python)
 
 ## Usage
 

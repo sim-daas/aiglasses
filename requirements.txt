@@ -1,5 +1,5 @@
-opencv-python==4.8.1.78
-google-generativeai==0.3.2
-python-dotenv==1.0.0
-Pillow==10.1.0
-tk
+numpy>=1.26.0,<2.0.0
+opencv-python>=4.8.0,<5.0.0
+google-generativeai>=0.8.0
+python-dotenv>=1.0.0
+Pillow>=10.0.0
