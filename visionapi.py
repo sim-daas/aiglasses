@@ -27,7 +27,45 @@ class VisionAPI:
             raise ValueError("GEMINI_API_KEY not found in environment variables")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Get available models and find a working one
+        self.model = None
+        try:
+            available = genai.list_models()
+            vision_models = [m for m in available if 'generateContent' in m.supported_generation_methods]
+            
+            if not vision_models:
+                raise ValueError("No models with generateContent capability found")
+            
+            # Try models in order until one works
+            for model_info in vision_models:
+                model_name = model_info.name  # Use full name including 'models/' prefix
+                try:
+                    print(f"Trying model: {model_name}")
+                    self.model = genai.GenerativeModel(model_name)
+                    
+                    # Test with a simple prompt to make sure it works
+                    test_response = self.model.generate_content("Hello")
+                    print(f"✅ Successfully initialized: {model_name}")
+                    break
+                    
+                except Exception as e:
+                    print(f"❌ Failed {model_name}: {e}")
+                    continue
+            
+            if self.model is None:
+                available_names = [m.name for m in vision_models]
+                raise ValueError(f"Could not initialize any model. Available: {available_names}")
+                
+        except Exception as e:
+            print(f"Error during model initialization: {e}")
+            # Last resort: try with a hardcoded model name
+            try:
+                print("Trying fallback model: models/gemini-1.5-flash")
+                self.model = genai.GenerativeModel("models/gemini-1.5-flash")
+                print("✅ Fallback model initialized")
+            except Exception as e2:
+                raise ValueError(f"Complete model initialization failure: {e2}")
         
         # Initialize webcam
         self.cap = None
@@ -38,6 +76,12 @@ class VisionAPI:
         self.cap = cv2.VideoCapture(camera_index)
         if not self.cap.isOpened():
             raise RuntimeError(f"Cannot open camera {camera_index}")
+        
+        # Optimize camera settings for better performance
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer to minimize lag
         return True
     
     def capture_frame(self):
@@ -206,10 +250,18 @@ class VisionGUI:
     
     def camera_loop(self):
         """Camera capture loop running in separate thread"""
+        import time
         while self.camera_running:
             frame = self.vision_api.capture_frame()
             if frame is not None:
+                # Clear old frames to prevent lag
+                while not self.frame_queue.empty():
+                    try:
+                        self.frame_queue.get_nowait()
+                    except queue.Empty:
+                        break
                 self.frame_queue.put(frame)
+            time.sleep(0.033)  # ~30 FPS
     
     def update_camera_display(self):
         """Update camera display in GUI"""
@@ -234,8 +286,8 @@ class VisionGUI:
             except Exception as e:
                 print(f"Display update error: {e}")
             
-            # Schedule next update
-            self.root.after(50, self.update_camera_display)
+            # Schedule next update (33ms = ~30 FPS)
+            self.root.after(33, self.update_camera_display)
     
     def capture_and_analyze(self):
         """Capture image and analyze with user query"""
