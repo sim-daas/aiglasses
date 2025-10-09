@@ -1,126 +1,146 @@
 import cv2
-import numpy as np
 import moderngl
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from pyrr import Matrix44
-import glfw
+import math
 
-# ---------- Create a window for moderngl ------------
-if not glfw.init():
-    raise RuntimeError("GLFW init failed")
+# ---------- 1. Setup webcam ----------
+cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    raise RuntimeError("Could not open webcam")
 
-width, height = 640, 480
-glfw.window_hint(glfw.VISIBLE, glfw.FALSE)        # hidden window
-window = glfw.create_window(width, height, "offscreen", None, None)
-glfw.make_context_current(window)
+w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-ctx = moderngl.create_context()
-fbo = ctx.simple_framebuffer((width, height))
+# ---------- 2. Create ModernGL context (offscreen) ----------
+ctx = moderngl.create_standalone_context()
+
+# Framebuffer to render text into
+fbo = ctx.simple_framebuffer((w, h))
 fbo.use()
+fbo.clear(0.0, 0.0, 0.0, 0.0)
 
-# ---------- Build a text texture --------------------
-def make_text_texture(text="HELLO 3D", size=128):
-    # Create a transparent RGBA image
-    img = Image.new("RGBA", (512, 128), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
-    
-    # Use textbbox to get width and height
-    bbox = draw.textbbox((0, 0), text, font=font)
-    w = bbox[2] - bbox[0]
-    h = bbox[3] - bbox[1]
-    
-    draw.text(((512 - w) // 2, (128 - h) // 2), text, font=font, fill=(255, 255, 0, 255))
-    
-    return ctx.texture(img.size, 4, img.tobytes())
+# ---------- 3. Create a 2D texture with PIL text ----------
+font = ImageFont.truetype("DejaVuSans-Bold.ttf", 128)  # adjust path
+text = "HELLO 3D"
 
-text_tex = make_text_texture("AI-Glasses")
+# Make a simple 3D-looking text image (with shadow and gradient)
+txt_img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+draw = ImageDraw.Draw(txt_img)
+
+bbox = draw.textbbox((0, 0), text, font=font)
+text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+x = (w - text_w) // 2
+y = (h - text_h) // 2
+
+# Shadow layer
+for offset in range(8):
+    draw.text((x + offset, y + offset), text, font=font, fill=(30, 30, 30, 180))
+
+# Main text with bright color
+draw.text((x, y), text, font=font, fill=(255, 215, 0, 255))
+
+# Upload as texture
+text_tex = ctx.texture((w, h), 4, txt_img.transpose(Image.FLIP_TOP_BOTTOM).tobytes())
 text_tex.build_mipmaps()
 text_tex.use()
 
-# ---------- Simple quad geometry --------------------
-quad = ctx.buffer(np.array([
-    # x,    y,   z,   u,  v
-    -1.0, -0.2, 0.0, 0.0, 0.0,
-     1.0, -0.2, 0.0, 1.0, 0.0,
-    -1.0,  0.2, 0.0, 0.0, 1.0,
-     1.0,  0.2, 0.0, 1.0, 1.0,
-], dtype='f4').tobytes())
-
-indices = ctx.buffer(np.array([0, 1, 2, 2, 1, 3], dtype='i4').tobytes())
-
+# ---------- 4. Shaders (perspective + rotation) ----------
 prog = ctx.program(
-    vertex_shader='''
-    #version 330
-    in vec3 in_pos;
-    in vec2 in_uv;
-    uniform mat4 mvp;
-    out vec2 uv;
-    void main() {
-        gl_Position = mvp * vec4(in_pos, 1.0);
-        uv = in_uv;
-    }
-    ''',
-    fragment_shader='''
-    #version 330
-    in vec2 uv;
-    uniform sampler2D tex;
-    out vec4 fragColor;
-    void main() {
-        vec4 c = texture(tex, uv);
-        fragColor = c;
-    }
-    '''
+    vertex_shader="""
+        #version 330
+        uniform mat4 Mvp;
+        in vec3 in_vert;
+        in vec2 in_tex;
+        out vec2 v_tex;
+        void main() {
+            gl_Position = Mvp * vec4(in_vert, 1.0);
+            v_tex = in_tex;
+        }
+    """,
+    fragment_shader="""
+        #version 330
+        in vec2 v_tex;
+        out vec4 fragColor;
+        uniform sampler2D Texture;
+        void main() {
+            fragColor = texture(Texture, v_tex);
+        }
+    """,
 )
 
-vao = ctx.vertex_array(
-    prog,
-    [(quad, '3f 2f', 'in_pos', 'in_uv')],
-    indices
-)
+quad_vertices = np.array([
+    #  x, y, z,   u, v
+    -1, -0.5, 0, 0, 0,
+     1, -0.5, 0, 1, 0,
+     1,  0.5, 0, 1, 1,
+    -1,  0.5, 0, 0, 1,
+], dtype='f4')
 
-# ---------- Camera + Projection ---------------------
-proj = Matrix44.perspective_projection(45.0, width / height, 0.1, 100.0)
-view = Matrix44.look_at(
-    eye=[0.0, 0.0, 3.0],    # camera 3 units away
-    target=[0.0, 0.0, 0.0],
-    up=[0.0, 1.0, 0.0]
-)
+indices = np.array([0, 1, 2, 2, 3, 0], dtype='i4')
 
-# ---------- OpenCV Webcam ---------------------------
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    raise RuntimeError("Cannot open webcam")
+vbo = ctx.buffer(quad_vertices.tobytes())
+ibo = ctx.buffer(indices.tobytes())
+vao = ctx.simple_vertex_array(prog, vbo, 'in_vert', 'in_tex', index_buffer=ibo)
 
+# ---------- 5. Projection + View ----------
+def perspective(fov, aspect, near, far):
+    f = 1.0 / math.tan(fov / 2)
+    return np.array([
+        [f / aspect, 0, 0, 0],
+        [0, f, 0, 0],
+        [0, 0, (far + near) / (near - far), -1],
+        [0, 0, (2 * far * near) / (near - far), 0],
+    ], dtype='f4')
+
+def rotation_y(angle):
+    c, s = math.cos(angle), math.sin(angle)
+    return np.array([
+        [c, 0, s, 0],
+        [0, 1, 0, 0],
+        [-s, 0, c, 0],
+        [0, 0, 0, 1],
+    ], dtype='f4')
+
+def translate(z):
+    return np.array([
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, z],
+        [0, 0, 0, 1],
+    ], dtype='f4')
+
+proj = perspective(math.radians(45), w / h, 0.1, 10.0)
+view = translate(-2.0)
+
+# ---------- 6. Main loop ----------
+angle = 0.0
 while True:
     ret, frame = cap.read()
     if not ret:
         break
-    frame = cv2.flip(frame, 1)
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # ---- Render 3-D text in moderngl FBO -------------
+    angle += 0.02  # slowly rotate
+    model = rotation_y(angle)
+    mvp = proj @ view @ model
+    prog['Mvp'].write(mvp.tobytes())
+
+    fbo.use()
     fbo.clear(0.0, 0.0, 0.0, 0.0)
-    model = Matrix44.from_translation([0.0, 0.0, 0.0]) @ Matrix44.from_scale([0.8, 0.8, 1.0])
-    prog['mvp'].write((proj @ view @ model).astype('f4').tobytes())
-    text_tex.use()
     vao.render()
 
-    # ---- Read back FBO as image ---------------------
-    overlay = np.frombuffer(fbo.read(components=4, alignment=1), dtype=np.uint8)
-    overlay = overlay.reshape((height, width, 4))
-    overlay_bgr = cv2.cvtColor(overlay, cv2.COLOR_RGBA2BGRA)
+    data = fbo.read(components=4, alignment=1)
+    text_img = np.frombuffer(data, dtype=np.uint8).reshape(h, w, 4)
+    text_img = np.flipud(text_img)  # fix upside-down output
 
-    # ---- Composite overlay onto webcam frame --------
-    alpha = overlay_bgr[:, :, 3] / 255.0
-    for c in range(3):
-        frame[:, :, c] = (1 - alpha) * frame[:, :, c] + alpha * overlay_bgr[:, :, c]
+    frame_bgra = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
 
-    cv2.imshow("AR Text Overlay", frame)
+    alpha = text_img[:, :, 3:4] / 255.0
+    blended = (frame_bgra * (1 - alpha) + text_img[:, :, :4] * alpha).astype(np.uint8)
 
-    if cv2.waitKey(1) & 0xFF == 27:  # ESC to exit
+    cv2.imshow("3D-Looking Text Overlay", blended)
+
+    if cv2.waitKey(1) & 0xFF == 27:  # ESC to quit
         break
 
 cap.release()
 cv2.destroyAllWindows()
-glfw.terminate()

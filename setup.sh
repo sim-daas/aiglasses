@@ -1,48 +1,61 @@
 #!/bin/bash
 
-# Setup script for AI Vision API
-echo "Setting up AI Vision API..."
+# Setup script for AI Glasses Pipeline
 
-# Check if Python 3 is installed
-if ! command -v python3 &> /dev/null; then
-    echo "Error: Python 3 is not installed. Please install Python 3.8 or higher."
-    exit 1
-fi
+echo "🔧 Setting up AI Glasses Pipeline..."
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv venv
-fi
+# Update system packages
+echo "📦 Updating system packages..."
+sudo apt update
 
-# Activate virtual environment
-echo "Activating virtual environment..."
-source venv/bin/activate
+# Install system dependencies for audio
+echo "🎵 Installing audio dependencies..."
+sudo apt install -y portaudio19-dev python3-pyaudio
 
-# Upgrade pip
-echo "Upgrading pip..."
-pip install --upgrade pip
-
-# Install packages from requirements.txt
-echo "Installing required packages..."
+# Install Python dependencies
+echo "🐍 Installing Python dependencies..."
 pip install -r requirements.txt
 
-# Create .env file if it doesn't exist
-if [ ! -f ".env" ]; then
-    echo "Creating .env file..."
-    cp .env.example .env
-    echo ""
-    echo "⚠️  IMPORTANT: Please edit .env file and add your Gemini API key!"
-    echo "   Get your API key from: https://makersuite.google.com/app/apikey"
-    echo ""
+# Create .env template if it doesn't exist
+if [ ! -f .env ]; then
+    echo "📝 Creating .env template..."
+    cat > .env << EOL
+# Add your API keys here
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
+EOL
+    echo "⚠️  Please edit .env file and add your API keys"
 fi
 
+# Check for camera devices
+echo "📷 Checking camera devices..."
+if [ -e /dev/video0 ]; then
+    echo "✅ Camera 0 found at /dev/video0"
+else
+    echo "❌ Camera 0 not found at /dev/video0"
+fi
+
+if [ -e /dev/video1 ]; then
+    echo "✅ Camera 1 found at /dev/video1"
+else
+    echo "❌ Camera 1 not found at /dev/video1"
+fi
+
+# Check audio devices
+echo "🎤 Checking audio devices..."
+python3 -c "
+import pyaudio
+p = pyaudio.PyAudio()
+print(f'Audio devices found: {p.get_device_count()}')
+for i in range(p.get_device_count()):
+    info = p.get_device_info_by_index(i)
+    if info['maxInputChannels'] > 0:
+        print(f'  Input device {i}: {info[\"name\"]}')
+p.terminate()
+"
+
 echo "✅ Setup complete!"
-echo ""
-echo "To run the application:"
-echo "1. Activate the virtual environment: source venv/bin/activate"
-echo "2. Add your Gemini API key to the .env file"
-echo "3. Run: python3 visionapi.py"
-echo ""
-echo "GUI Mode: python3 visionapi.py"
-echo "CLI Mode: python3 visionapi.py --mode cli"
+echo "📋 Next steps:"
+echo "   1. Edit .env file and add your API keys"
+echo "   2. Ensure cameras are connected to /dev/video0 and /dev/video1"
+echo "   3. Run: python3 aipipeline.py"

@@ -1,198 +1,86 @@
-# AI Vision API with Gemini
+# AI Glasses Pipeline
 
-A modular Python library for real-time image analysis using Google's Gemini AI and webcam input.
+Complete pipeline combining stereo vision, voice recognition, AI vision analysis, and 3D object detection.
 
 ## Features
 
-- **Modular Design**: Reusable `VisionAPI` class for integration into other projects
-- **Real-time Webcam Capture**: Uses OpenCV for camera access
-- **Gemini AI Integration**: Latest Google Generative AI API
-- **Dual Interface**: Both GUI (Tkinter) and CLI modes
-- **Structured Output**: JSON responses with `answer` and `label` fields
-- **Environment Variables**: Secure API key management with `.env` files
+- **Stereo Vision**: Uses two cameras (/dev/video0 and /dev/video1) for depth perception
+- **Voice Recognition**: Press-to-talk functionality using Deepgram API
+- **AI Vision Analysis**: Gemini Vision API for understanding scenes and answering questions
+- **3D Object Detection**: NanoOwl for object detection with 3D bounding boxes
+- **Real-time Processing**: Live camera feed with overlay information
 
-## Installation
+## Setup
 
-### Quick Setup (Recommended)
-```bash
-chmod +x setup.sh
-./setup.sh
-```
+1. **Install Dependencies**:
+   ```bash
+   chmod +x setup.sh
+   ./setup.sh
+   ```
 
-### Manual Installation
+2. **Configure API Keys**:
+   Edit the `.env` file and add your API keys:
+   ```
+   DEEPGRAM_API_KEY=your_deepgram_api_key_here
+   GEMINI_API_KEY=your_gemini_api_key_here
+   ```
 
-1. **Create virtual environment (recommended):**
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-2. **Install packages:**
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-3. **Get Gemini API Key:**
-   - Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
-   - Create a new API key
-   - Copy the key
-
-4. **Setup Environment Variables:**
-```bash
-cp .env.example .env
-# Edit .env file and add your API key:
-# GEMINI_API_KEY=your_actual_api_key_here
-```
-
-### Troubleshooting NumPy/OpenCV Compatibility
-If you encounter NumPy version conflicts:
-```bash
-pip uninstall numpy opencv-python
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-## Required Packages
-
-- `numpy>=1.26.0,<2.0.0` - Numerical computing (compatible with OpenCV)
-- `opencv-python>=4.8.0,<5.0.0` - Computer vision and webcam access
-- `google-generativeai>=0.8.0` - Google Gemini AI API (latest)
-- `python-dotenv>=1.0.0` - Environment variable management
-- `Pillow>=10.0.0` - Image processing
-- `tkinter` - GUI framework (usually included with Python)
+3. **Connect Cameras**:
+   - Connect stereo cameras to /dev/video0 and /dev/video1
+   - Ensure cameras are recognized by the system
 
 ## Usage
 
-### GUI Mode (Recommended)
-```bash
-python visionapi.py --mode gui
-```
-or
-```bash
-python visionapi.py  # GUI is default
-```
+1. **Start the Pipeline**:
+   ```bash
+   python3 aipipeline.py
+   ```
 
-### CLI Mode
-```bash
-python visionapi.py --mode cli
-```
-- Press 'c' to capture and analyze image
-- Press 'q' to quit
+2. **Using the Interface**:
+   - Click "Start Pipeline" to begin camera capture
+   - Hold the microphone button and speak your query
+   - Release the button to process voice and vision
+   - View results in the status panels
 
-### Programmatic Usage
+## Pipeline Flow
 
-```python
-from visionapi import VisionAPI
+1. **Voice Input**: Hold mic button → record audio → release button
+2. **Voice Recognition**: Audio sent to Deepgram API for transcription
+3. **Frame Capture**: Current video frame saved for analysis
+4. **Vision Analysis**: Frame + query sent to Gemini Vision API
+5. **Object Detection**: Object label used with NanoOwl for detection
+6. **3D Visualization**: 2D detections + depth map → 3D bounding boxes
+7. **Display**: Results overlaid on live video feed
 
-# Initialize
-vision = VisionAPI()
-vision.initialize_camera()
+## Components
 
-# Capture and analyze
-frame = vision.capture_frame()
-result = vision.analyze_image(frame, "What objects do you see?")
+- `aipipeline.py` - Main pipeline application
+- `visionapi.py` - Gemini Vision API integration
+- `bbox3d_utils.py` - 3D bounding box utilities
+- `owl_predict.py` - NanoOwl object detection
+- `depth.py` - Stereo depth calculation
+- `detect.py` - Detection visualization
+- `3dtext.py` - 3D text effects
 
-print(f"Answer: {result['answer']}")
-print(f"Main object: {result['label']}")
+## Requirements
 
-# Cleanup
-vision.cleanup()
-```
-
-### Integration Example
-
-```python
-from visionapi import VisionAPI
-
-class MyApp:
-    def __init__(self):
-        self.vision = VisionAPI(env_file_path="path/to/your/.env")
-        self.vision.initialize_camera()
-    
-    def analyze_scene(self, user_question):
-        frame = self.vision.capture_frame()
-        return self.vision.analyze_image(frame, user_question)
-```
-
-## API Reference
-
-### VisionAPI Class
-
-#### `__init__(env_file_path=".env")`
-Initialize with environment file path containing `GEMINI_API_KEY`.
-
-#### `initialize_camera(camera_index=0)`
-Initialize webcam. Returns `True` on success.
-
-#### `capture_frame()`
-Capture current frame from webcam. Returns OpenCV frame or `None`.
-
-#### `analyze_image(frame, user_query)`
-Analyze frame with user query. Returns JSON:
-```json
-{
-    "answer": "Detailed response to user query",
-    "label": "primary_object_name"
-}
-```
-
-#### `cleanup()`
-Release camera resources.
-
-### VisionGUI Class
-
-#### `__init__()`
-Initialize GUI interface.
-
-#### `run()`
-Start the GUI application.
-
-## Output Format
-
-The API always returns a JSON object with two fields:
-- `answer`: Detailed response addressing the user's query
-- `label`: Single word or short phrase identifying the main object
-
-Example:
-```json
-{
-    "answer": "I can see a red apple sitting on a wooden table. The apple appears fresh and has a glossy surface.",
-    "label": "apple"
-}
-```
-
-## Error Handling
-
-The system handles various error conditions:
-- Missing API key
-- Camera initialization failures
-- Network connectivity issues
-- Invalid API responses
-
-Errors are returned in the same JSON format:
-```json
-{
-    "answer": "Error description",
-    "label": "error"
-}
-```
+- Python 3.8+
+- OpenCV 4.8+
+- Two USB cameras for stereo vision
+- Microphone for voice input
+- Deepgram API key
+- Gemini API key
+- NanoOwl model files (will be downloaded automatically)
 
 ## Troubleshooting
 
-1. **Camera not working**: Check if camera is being used by another application
-2. **API key errors**: Verify your `.env` file contains the correct `GEMINI_API_KEY`
-3. **Import errors**: Run `pip install -r requirements.txt`
-4. **GUI issues**: Ensure tkinter is installed (`sudo apt-get install python3-tk` on Ubuntu)
+- **Camera Issues**: Check `/dev/video0` and `/dev/video1` exist
+- **Audio Issues**: Verify microphone permissions and PyAudio installation
+- **API Issues**: Ensure API keys are correct in `.env` file
+- **Model Issues**: NanoOwl models will be downloaded on first run
 
-## Latest API Syntax
+## API Keys
 
-This implementation uses the latest Google Generative AI Python SDK (v0.3.2) with the following key features:
-- `genai.configure(api_key=api_key)` for authentication
-- `genai.GenerativeModel('gemini-1.5-flash')` for the latest model
-- `model.generate_content([prompt, image])` for multimodal input
-- PIL Image format for image input (converted from OpenCV frames)
-
-## License
-
-MIT License - feel free to use in your projects!
+Get your API keys from:
+- [Deepgram Console](https://console.deepgram.com/)
+- [Google AI Studio](https://makersuite.google.com/app/apikey)
