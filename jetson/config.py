@@ -22,7 +22,7 @@ class Config:
     
     # Gemini API
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-    GEMINI_MODEL = 'gemini-1.5-flash'  # Fixed: was 'gemini-2.5-flash', should be 'gemini-1.5-flash'
+    GEMINI_MODEL = 'gemini-2.5-flash'  # Fixed: was 'gemini-2.5-flash', should be 'gemini-1.5-flash'
     GEMINI_MAX_RETRIES = 3
     GEMINI_RETRY_DELAY = 2  # seconds
     

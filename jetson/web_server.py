@@ -43,11 +43,11 @@ class WebServer:
             self.app,
             cors_allowed_origins="*",
             async_mode='threading',
-            logger=True,  # Enable logging to debug
-            engineio_logger=True,  # Enable engine.io logging
+            logger=True,
+            engineio_logger=True,
             ping_timeout=60,
             ping_interval=25,
-            manage_session=False  # Important for threading mode
+            manage_session=False
         )
         
         self.camera_manager = camera_manager
@@ -107,18 +107,16 @@ class WebServer:
             min-height: 60px;
             display: none;
         }
+        #location-info {
+            background: rgba(0,255,0,0.2);
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            display: none;
+        }
         .info {
             color: #888;
             font-size: 14px;
-        }
-        #debug {
-            background: rgba(255, 0, 0, 0.2);
-            padding: 10px;
-            margin: 10px 0;
-            font-family: monospace;
-            font-size: 12px;
-            max-width: 90vw;
-            overflow-x: auto;
         }
     </style>
 </head>
@@ -134,7 +132,7 @@ class WebServer:
         
         <div id="answer"></div>
         
-        <div id="location-info" style="background: rgba(0,255,0,0.2); padding: 10px; margin: 10px 0; display: none;">
+        <div id="location-info">
             <strong>Object:</strong> <span id="object-name"></span><br>
             <strong>Location:</strong> <span id="object-location"></span>
         </div>
@@ -148,10 +146,10 @@ class WebServer:
     <script>
         console.log('Starting Socket.IO initialization...');
         
-        // Initialize Socket.IO with explicit path and configuration
+        // Initialize Socket.IO
         const socket = io(window.location.origin, {
             path: '/socket.io',
-            transports: ['polling', 'websocket'],  // Try polling first, then upgrade
+            transports: ['polling', 'websocket'],
             upgrade: true,
             reconnection: true,
             reconnectionDelay: 1000,

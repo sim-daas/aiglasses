@@ -20,18 +20,6 @@ class GeminiClient:
     def process_multimodal_query(self, image_path, audio_path=None, text_query=None):
         """
         Process image + audio/text query with Gemini
-        
-        Returns structured JSON:
-        {
-            "transcription": "user's spoken query",
-            "answer": "concise answer",
-            "object": "detected object label",
-            "position": {
-                "x": 0.5,  # normalized 0-1
-                "y": 0.5,  # normalized 0-1
-                "confidence": 0.95
-            }
-        }
         """
         for attempt in range(Config.GEMINI_MAX_RETRIES):
             try:
