@@ -31,12 +31,18 @@ class StereoCamera:
         # List available cameras
         self._list_available_cameras()
         
-        # Open left camera using device path with GStreamer pipeline
+        # Open left camera (use default backend, no CAP_V4L2)
         print(f"📷 Opening left camera ({Config.CAMERA_LEFT_INDEX})...")
-        self.cap_left = self._open_camera_with_gstreamer(Config.CAMERA_LEFT_INDEX, "left")
+        self.cap_left = cv2.VideoCapture(Config.CAMERA_LEFT_INDEX)
         
-        if not self.cap_left or not self.cap_left.isOpened():
+        if not self.cap_left.isOpened():
             raise RuntimeError(f"Cannot open camera {Config.CAMERA_LEFT_INDEX}")
+        
+        # Set properties for left camera
+        self.cap_left.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_WIDTH)
+        self.cap_left.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_HEIGHT)
+        self.cap_left.set(cv2.CAP_PROP_FPS, Config.CAMERA_FPS)
+        self.cap_left.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
         # Test read from left camera
         ret, frame = self.cap_left.read()
@@ -46,16 +52,23 @@ class StereoCamera:
         
         print(f"✅ Left camera initialized: {frame.shape[1]}x{frame.shape[0]}")
         
-        # Small delay before opening second camera
-        time.sleep(0.5)
+        # Important: Delay before opening second camera
+        print("⏳ Waiting before opening second camera...")
+        time.sleep(1.0)  # Increased delay
         
-        # Open right camera
+        # Open right camera (use default backend, no CAP_V4L2)
         print(f"📷 Opening right camera ({Config.CAMERA_RIGHT_INDEX})...")
-        self.cap_right = self._open_camera_with_gstreamer(Config.CAMERA_RIGHT_INDEX, "right")
+        self.cap_right = cv2.VideoCapture(Config.CAMERA_RIGHT_INDEX)
         
-        if not self.cap_right or not self.cap_right.isOpened():
+        if not self.cap_right.isOpened():
             self.cap_left.release()  # Clean up left camera
             raise RuntimeError(f"Cannot open camera {Config.CAMERA_RIGHT_INDEX}")
+        
+        # Set properties for right camera
+        self.cap_right.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_WIDTH)
+        self.cap_right.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_HEIGHT)
+        self.cap_right.set(cv2.CAP_PROP_FPS, Config.CAMERA_FPS)
+        self.cap_right.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
         # Test read from right camera
         ret, frame = self.cap_right.read()
@@ -78,42 +91,6 @@ class StereoCamera:
         if not os.path.exists(Config.CAMERA_RIGHT_INDEX):
             raise RuntimeError(f"Camera device {Config.CAMERA_RIGHT_INDEX} does not exist")
         print(f"  ✅ {Config.CAMERA_RIGHT_INDEX} exists")
-    
-    def _open_camera_with_gstreamer(self, device_path, name):
-        """
-        Open camera using GStreamer pipeline for Jetson compatibility
-        Falls back to direct V4L2 if GStreamer fails
-        """
-        # Try GStreamer pipeline first (best for Jetson)
-        gst_pipeline = (
-            f"v4l2src device={device_path} ! "
-            f"video/x-raw, width={Config.CAMERA_WIDTH}, height={Config.CAMERA_HEIGHT}, framerate={Config.CAMERA_FPS}/1 ! "
-            "videoconvert ! video/x-raw, format=BGR ! appsink drop=1"
-        )
-        
-        print(f"  Trying GStreamer pipeline for {name} camera...")
-        cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
-        
-        if cap.isOpened():
-            print(f"  ✅ {name.capitalize()} camera opened with GStreamer")
-            return cap
-        
-        print(f"  ⚠️  GStreamer failed, trying V4L2 directly...")
-        
-        # Fallback: Try direct V4L2 with device path
-        cap = cv2.VideoCapture(device_path, cv2.CAP_V4L2)
-        
-        if cap.isOpened():
-            # Set properties
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_WIDTH)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_HEIGHT)
-            cap.set(cv2.CAP_PROP_FPS, Config.CAMERA_FPS)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            print(f"  ✅ {name.capitalize()} camera opened with V4L2")
-            return cap
-        
-        print(f"  ❌ Failed to open {name} camera with both methods")
-        return None
         
     def _list_available_cameras(self):
         """List available cameras for debugging"""
@@ -122,9 +99,9 @@ class StereoCamera:
         for i in range(10):
             device = f"/dev/video{i}"
             if os.path.exists(device):
-                # Check if it's a real camera (not a metadata device)
+                # Try opening without backend specification
                 try:
-                    cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
+                    cap = cv2.VideoCapture(device)
                     if cap.isOpened():
                         ret, frame = cap.read()
                         cap.release()
@@ -132,9 +109,13 @@ class StereoCamera:
                         if ret:
                             print(f"  ✅ {device} - Working (captured {frame.shape})")
                         else:
-                            print(f"  ⚠️  {device} - Opens but no frames (may be metadata device)")
+                            print(f"  ⚠️  {device} - Opens but no frames")
                     else:
-                        print(f"  ❌ {device} - Cannot open with V4L2")
+                        print(f"  ❌ {device} - Cannot open")
+                    
+                    # Small delay between tests
+                    time.sleep(0.2)
+                    
                 except Exception as e:
                     print(f"  ❌ {device} - Error: {e}")
             else:
