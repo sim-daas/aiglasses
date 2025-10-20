@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AURA AI Glasses - 3D Overlay</title>
+    <title>AURA AI Glasses - 3D Depth Overlay</title>
     <style>
         * {
             margin: 0;
@@ -31,9 +31,17 @@
             width: 100%;
             height: 100%;
             object-fit: contain;
+            filter: brightness(0.95);
         }
 
-        /* 3D text card overlay with proper 3D transform support */
+        /* Three.js canvas for depth occlusion */
+        canvas {
+            position: absolute;
+            inset: 0;
+            pointer-events: auto;
+        }
+
+        /* 3D text card overlay with proper transform support */
         .card3d {
             position: absolute;
             left: 0;
@@ -50,9 +58,9 @@
             font: 700 22px/1.18 "Inter", system-ui;
             will-change: transform;
             overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
         }
 
-        /* Parent holds camera perspective for 3D look */
         #cards {
             position: absolute;
             inset: 0;
@@ -82,7 +90,40 @@
             color: #f00;
         }
 
-        /* Control panel for real-time adjustments */
+        /* HUD controls */
+        #hud {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            display: flex;
+            gap: 8px;
+            z-index: 100;
+        }
+
+        #hud input {
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            background: #111;
+            color: #eee;
+            font-size: 14px;
+        }
+
+        #ask {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #3a3;
+            background: #0b3;
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #ask:hover {
+            background: #0d5;
+        }
+
+        /* Control panel */
         #controls {
             position: absolute;
             bottom: 20px;
@@ -168,14 +209,42 @@
         .controls-hidden {
             display: none;
         }
+
+        /* Depth info panel */
+        #depth-info {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            font-size: 12px;
+            z-index: 100;
+            color: #0f0;
+        }
     </style>
 </head>
 
 <body>
     <div id="wrap">
         <img id="feed" src="/video_feed" alt="Camera Feed" />
+
+        <!-- Three.js canvas will be inserted here -->
+
         <div id="cards"></div>
+
+        <div id="hud">
+            <input id="q" size="32" placeholder="Type a question, tap object, hit Ask…" />
+            <button id="ask">Ask</button>
+        </div>
+
         <div id="status" class="status-disconnected">Connecting...</div>
+
+        <div id="depth-info">
+            Depth: <span id="depth-value">--</span> cm<br>
+            3D Mode: <span id="mode-3d">Loading...</span>
+        </div>
 
         <button id="toggle-controls">Toggle Controls</button>
 
@@ -231,18 +300,115 @@
                 <label>Perspective <span class="value" id="val-perspective">900</span>px</label>
                 <input type="range" id="perspective" min="300" max="2000" value="900" step="50">
             </div>
+
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="enable-depth-occlusion" checked>
+                    Enable Depth Occlusion
+                </label>
+            </div>
         </div>
     </div>
 
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
     <script>
-        console.log('🚀 AURA AI Glasses - True 3D Overlay with Homography');
+        console.log('🚀 AURA AI Glasses - 3D Depth-Aware Overlay');
 
         const wrap = document.getElementById('wrap');
         const feed = document.getElementById('feed');
         const cards = document.getElementById('cards');
         const status = document.getElementById('status');
+        const depthValueEl = document.getElementById('depth-value');
+        const mode3dEl = document.getElementById('mode-3d');
         const panels = new Map();
+
+        // Three.js setup for depth occlusion
+        const scene = new THREE.Scene();
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+        wrap.insertBefore(renderer.domElement, cards); // Insert before cards overlay
+
+        let camera, fx = 900, fy = 900, cx = 320, cy = 240, imgW = 640, imgH = 480;
+
+        function setCameraFromIntrinsics() {
+            const fovY = 2 * Math.atan(imgH / (2 * fy)) * 180 / Math.PI;
+            camera = new THREE.PerspectiveCamera(fovY, wrap.clientWidth / wrap.clientHeight, 0.05, 20);
+            camera.position.set(0, 0, 0);
+            camera.lookAt(0, 0, -1);
+        }
+        setCameraFromIntrinsics();
+
+        // Depth mesh for occlusion
+        let depthMesh, gridW = 0, gridH = 0, depthData = null;
+        let depthOcclusionEnabled = true;
+
+        function buildDepthMesh() {
+            if (depthMesh) scene.remove(depthMesh);
+            const geo = new THREE.PlaneGeometry(2, 2, gridW - 1, gridH - 1);
+            const mat = new THREE.MeshBasicMaterial({ color: 0x000000, depthWrite: true, depthTest: true });
+            mat.colorWrite = false; // Pure occluder
+            depthMesh = new THREE.Mesh(geo, mat);
+            depthMesh.frustumCulled = false;
+            scene.add(depthMesh);
+            mode3dEl.textContent = `Active (${gridW}x${gridH})`;
+        }
+
+        // Convert image pixel + depth to 3D camera space
+        function unproject(u, v, Z) {
+            const X = (u - cx) / fx * Z;
+            const Y = -(v - cy) / fy * Z;
+            return new THREE.Vector3(X, Y, -Z);
+        }
+
+        // Update depth mesh vertices
+        function updateDepthMesh() {
+            if (!depthMesh || !depthData || !depthOcclusionEnabled) return;
+            const pos = depthMesh.geometry.attributes.position;
+            let idx = 0;
+            for (let j = 0; j < gridH; j++) {
+                for (let i = 0; i < gridW; i++) {
+                    const Z = depthData[j * gridW + i] || 6.0;
+                    const u = (i + 0.5) * (imgW / gridW);
+                    const v = (j + 0.5) * (imgH / gridH);
+                    const p = unproject(u, v, Math.max(0.05, Math.min(6.0, Z)));
+                    pos.setXYZ(idx, p.x, p.y, p.z);
+                    idx++;
+                }
+            }
+            pos.needsUpdate = true;
+            depthMesh.geometry.computeVertexNormals();
+        }
+
+        // Fetch depth grid from server
+        async function fetchDepth() {
+            try {
+                const r = await fetch('/depth');
+                const j = await r.json();
+                if (j && j.z) {
+                    imgW = j.w; imgH = j.h; fx = j.fx; fy = j.fy; cx = j.cx; cy = j.cy;
+                    if (gridW !== j.gw || gridH !== j.gh) {
+                        gridW = j.gw; gridH = j.gh;
+                        buildDepthMesh();
+                        setCameraFromIntrinsics();
+                    }
+                    depthData = j.z;
+                    updateDepthMesh();
+
+                    // Update center depth display
+                    const centerIdx = Math.floor(gridH / 2) * gridW + Math.floor(gridW / 2);
+                    const centerDepth = depthData[centerIdx];
+                    if (centerDepth) {
+                        depthValueEl.textContent = (centerDepth * 100).toFixed(0);
+                    }
+                }
+            } catch (e) {
+                console.warn('Depth fetch failed:', e);
+            }
+            setTimeout(fetchDepth, 90);
+        }
+        // Start depth fetching
+        fetchDepth();
 
         // Adjustable parameters
         const params = {
@@ -293,6 +459,11 @@
             document.getElementById('toggle-controls').addEventListener('click', () => {
                 document.getElementById('controls').classList.toggle('controls-hidden');
             });
+
+            document.getElementById('enable-depth-occlusion').addEventListener('change', (e) => {
+                depthOcclusionEnabled = e.target.checked;
+                mode3dEl.textContent = depthOcclusionEnabled ? `Active (${gridW}x${gridH})` : 'Disabled';
+            });
         }
 
         // Update all panel styles
@@ -318,37 +489,30 @@
             return `${r}, ${g}, ${b}`;
         }
 
-        // Convert image coordinates to screen coordinates
         function imgToScreen(x, y) {
             const vw = wrap.clientWidth, vh = wrap.clientHeight;
-            const imgW = 640, imgH = 480;
             const s = Math.min(vw / imgW, vh / imgH);
             const dispW = imgW * s, dispH = imgH * s;
             const offX = (vw - dispW) / 2, offY = (vh - dispH) / 2;
             return [offX + x * s, offY + y * s];
         }
 
-        // Order corners as TL, TR, BR, BL
         function orderCorners(pts) {
             pts = pts.slice();
-            // Sort by y, then x
             pts.sort((p, q) => (p[1] - q[1]) || (p[0] - q[0]));
             const tl = pts[0], tr = pts[1];
             const bl = pts[2], br = pts[3];
-            // Ensure correct x order
             const top = (tl[0] < tr[0]) ? [tl, tr] : [tr, tl];
             const bottom = (bl[0] < br[0]) ? [bl, br] : [br, bl];
-            return [top[0], top[1], bottom[1], bottom[0]]; // TL, TR, BR, BL
+            return [top[0], top[1], bottom[1], bottom[0]];
         }
 
-        // Calculate CSS matrix3d for projective transform
         function cssMatrixForQuad(xy, w = 260, h = 140) {
             const x0 = xy[0][0], y0 = xy[0][1];
             const x1 = xy[1][0], y1 = xy[1][1];
             const x2 = xy[2][0], y2 = xy[2][1];
             const x3 = xy[3][0], y3 = xy[3][1];
 
-            // Homography mapping unit rectangle to quad
             const dx1 = x1 - x2, dy1 = y1 - y2;
             const dx2 = x3 - x2, dy2 = y3 - y2;
             const sx = x0 - x1 + x2 - x3;
@@ -365,14 +529,11 @@
             let f = y0;
             let g1 = g, h1 = h2;
 
-            // Normalize to element size
             a /= w; b /= h; d /= w; e /= h; g1 /= w; h1 /= h;
 
-            // CSS matrix3d (column-major)
             return `matrix3d(${a}, ${d}, 0, ${g1}, ${b}, ${e}, 0, ${h1}, 0, 0, 1, 0, ${c}, ${f}, 0, 1)`;
         }
 
-        // Create or get panel element
         function ensurePanel(id, text) {
             if (!panels.has(id)) {
                 const el = document.createElement('div');
@@ -386,23 +547,17 @@
             return el;
         }
 
-        // Position panel in TRUE 3D using homography
         function placePanel3D(el, corners) {
             if (!corners || corners.length !== 4) {
                 el.style.display = 'none';
                 return;
             }
 
-            // Order and convert to screen space
             const ord = orderCorners(corners);
             const scr = ord.map(([x, y]) => imgToScreen(x, y));
-
-            // Apply homography-based transform
             const matrix = cssMatrixForQuad(scr, el.offsetWidth || 260, el.offsetHeight || 140);
             el.style.transform = matrix;
             el.style.display = 'block';
-
-            console.log('Applied 3D transform:', matrix.substring(0, 50) + '...');
         }
 
         // Socket.IO connection
@@ -447,8 +602,6 @@
         });
 
         function generateCornersFromPosition(position, location) {
-            const imgW = 640, imgH = 480;
-
             const locationMap = {
                 'top-left': [0.20, 0.20],
                 'top-center': [0.50, 0.20],
@@ -474,8 +627,22 @@
             ];
         }
 
+        // Three.js render loop
+        function tick() {
+            requestAnimationFrame(tick);
+            renderer.render(scene, camera);
+        }
+        tick();
+
+        // Window resize handler
+        function onResize() {
+            renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+            setCameraFromIntrinsics();
+        }
+        addEventListener('resize', onResize);
+
         setupControls();
-        console.log('✅ True 3D Overlay system initialized with homography transforms');
+        console.log('✅ 3D Depth-Aware Overlay system initialized');
     </script>
 </body>
 
