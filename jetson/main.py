@@ -445,17 +445,25 @@ class AURAGlasses:
             
             logger.info("📸 Frame captured, sending to Gemini for translation...")
             
-            # Updated translation prompt to get both original and translation
-            translation_query = """Look at this image and identify the MAIN or MOST PROMINENT text visible.
-Provide your response in exactly this format (use these exact labels):
-ORIGINAL: [the exact original text as written]
-TRANSLATION: [the English translation]
+            # Clear, structured translation prompt
+            translation_query = """Analyze this image and find the MAIN text that needs translation.
 
-Rules:
-- Keep ORIGINAL text exactly as it appears, in its original language
-- If already in English, still show it in ORIGINAL and repeat in TRANSLATION
-- Focus only on the most important text, ignore small labels
-- Do not add any other commentary or formatting"""
+Your response MUST follow this EXACT format (use these exact labels on separate lines):
+
+ORIGINAL_TEXT: [write the exact text as it appears in the image, in its original language]
+ENGLISH_TRANSLATION: [write the English translation of that text]
+
+IMPORTANT RULES:
+1. Extract the most prominent/important text you see
+2. Keep ORIGINAL_TEXT in its original language (Spanish, French, etc.)
+3. If text is already in English, still include it in both fields
+4. Do not add any extra commentary, explanations, or labels
+5. Each field should be on its own line
+6. Do not use markdown formatting or code blocks
+
+Example format:
+ORIGINAL_TEXT: Nuestro servicio es rápido
+ENGLISH_TRANSLATION: Our service is fast"""
             
             # Process with Gemini
             result = self.gemini.process_multimodal_query(
@@ -464,21 +472,41 @@ Rules:
             )
             
             # Parse the response to extract original and translation
-            answer = result['answer']
+            answer = result['answer'].strip()
             original_text = ""
             translation_text = ""
             
-            # Try to parse ORIGINAL: and TRANSLATION: format
-            if "ORIGINAL:" in answer and "TRANSLATION:" in answer:
-                parts = answer.split("TRANSLATION:")
-                original_part = parts[0].replace("ORIGINAL:", "").strip()
-                translation_part = parts[1].strip()
-                original_text = original_part
-                translation_text = translation_part
-            else:
-                # Fallback: use the whole answer as translation
-                original_text = "Text detected"
-                translation_text = answer
+            logger.info(f"Raw Gemini response:\n{answer}")
+            
+            # Try to parse ORIGINAL_TEXT: and ENGLISH_TRANSLATION: format
+            lines = answer.split('\n')
+            for line in lines:
+                line = line.strip()
+                if line.startswith('ORIGINAL_TEXT:'):
+                    original_text = line.replace('ORIGINAL_TEXT:', '').strip()
+                elif line.startswith('ENGLISH_TRANSLATION:'):
+                    translation_text = line.replace('ENGLISH_TRANSLATION:', '').strip()
+            
+            # Fallback parsing if labels not found
+            if not original_text or not translation_text:
+                logger.warning("⚠️  Standard format not found, trying fallback parsing...")
+                # Try splitting by common patterns
+                if '\n' in answer:
+                    parts = answer.split('\n')
+                    parts = [p.strip() for p in parts if p.strip()]
+                    if len(parts) >= 2:
+                        original_text = parts[0]
+                        translation_text = parts[1]
+                    else:
+                        original_text = answer
+                        translation_text = answer
+                else:
+                    original_text = answer
+                    translation_text = answer
+            
+            # Clean up any remaining artifacts
+            original_text = original_text.replace('**', '').replace('```', '').strip()
+            translation_text = translation_text.replace('**', '').replace('```', '').strip()
             
             # Store original text in result
             result['original_text'] = original_text
@@ -497,7 +525,7 @@ Rules:
             result['position']['z'] = depth_value
             result['position']['depth_normalized'] = depth_value
             
-            # Mark as translation type to prevent auto-hide
+            # Mark as translation type
             result['type'] = 'translation'
             
             logger.info("📊 TRANSLATION RESULTS:")
