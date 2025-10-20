@@ -34,7 +34,6 @@ class GestureKeyboard:
     
     # Gesture timing
     PINCH_COOLDOWN = 0.3      # Prevent rapid repeated selections
-    SUBMIT_HOLD_S = 1.5       # Hold time to submit
     BACKSPACE_HOLD_S = 0.5    # Hold time for continuous backspace
     KEY_DEBOUNCE_S = 1.8      # Minimum time between same key presses
     
@@ -56,7 +55,6 @@ class GestureKeyboard:
         # State
         self.typed_text = ""
         self.last_key_time = 0
-        self.submit_hold_start = None
         self.backspace_hold_start = None
         self.last_backspace_time = 0
         
@@ -147,11 +145,12 @@ class GestureKeyboard:
                 thickness = 3
                 text_color = (0, 255, 0)
             elif key == 'SUBMIT':
-                color = (100, 200, 255)
+                # Same style as other keys
+                color = (80, 80, 80)
                 thickness = 2
                 text_color = (200, 200, 200)
             elif key == 'BACK':
-                color = (100, 100, 255)
+                color = (80, 80, 80)
                 thickness = 2
                 text_color = (200, 200, 200)
             else:
@@ -308,16 +307,11 @@ class GestureKeyboard:
                 # Check debounce for this specific key
                 if self._can_press_key(hover_key):
                     if hover_key == 'SUBMIT':
-                        # Hold detection for submit
-                        if self.submit_hold_start is None:
-                            self.submit_hold_start = now
-                        elif now - self.submit_hold_start >= self.SUBMIT_HOLD_S:
-                            should_submit = True
-                            status = "Submitting query!"
-                            self.submit_hold_start = None
-                        else:
-                            progress = (now - self.submit_hold_start) / self.SUBMIT_HOLD_S
-                            status = f"Hold to submit... {int(progress * 100)}%"
+                        # Instant submit - no hold required
+                        should_submit = True
+                        status = "Submitting query!"
+                        # Record press time to prevent repeat
+                        self.last_key_press_times[hover_key] = now
                     
                     elif hover_key == 'BACK':
                         # Continuous backspace on hold
@@ -340,7 +334,6 @@ class GestureKeyboard:
                     status = f"Wait {time_remaining:.1f}s to press '{hover_key}' again"
             else:
                 # Not pinching - reset hold timers and current pinch key
-                self.submit_hold_start = None
                 self.backspace_hold_start = None
                 if not is_pinching:
                     self.current_pinch_key = None
