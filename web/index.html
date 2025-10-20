@@ -551,10 +551,8 @@
         socket.on('gemini_result', (result) => {
             console.log('📡 ========== GEMINI RESULT RECEIVED ==========');
             console.log('Full result:', result);
+            console.log('Type:', result.type || 'query');
             console.log('==============================================');
-
-            // Hide test button when result arrives
-            testButton.classList.add('hidden');
 
             // Update status text
             status.innerHTML =
@@ -569,7 +567,8 @@
                 id: 1,
                 text: `${result.answer}\n\n[${result.object}]`,
                 position: result.position,
-                location: result.location
+                location: result.location,
+                type: result.type || 'query'
             }];
 
             const live = new Set();
@@ -587,12 +586,9 @@
             });
 
             console.log('✅ Panel displayed successfully');
+            console.log(`ℹ️  Type: ${result.type || 'query'} - will persist until next query`);
 
-            // Auto-hide after 15 seconds
-            setTimeout(() => {
-                panels.forEach(el => el.style.display = 'none');
-                console.log('🗑️ Panel auto-hidden after timeout');
-            }, 15000);
+            // NO auto-hide timer - panels stay until next result
         });
 
         // Initialize

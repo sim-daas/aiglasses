@@ -459,6 +459,11 @@ Focus only on the most important text, ignore small labels or background text.""
                 text_query=translation_query
             )
             
+            # Force center-bottom location for translation
+            result['location'] = 'bottom-center'
+            result['position']['x'] = 0.5  # Center horizontally
+            result['position']['y'] = 0.8  # Bottom area
+            
             # Add depth information
             pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
             pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
@@ -467,8 +472,12 @@ Focus only on the most important text, ignore small labels or background text.""
             result['position']['z'] = depth_value
             result['position']['depth_normalized'] = depth_value
             
+            # Mark as translation type to prevent auto-hide
+            result['type'] = 'translation'
+            
             logger.info("📊 TRANSLATION RESULTS:")
             logger.info(f"   A: {result['answer']}")
+            logger.info(f"   Location: bottom-center (forced)")
             
             # Broadcast to web clients
             self.server.broadcast_result(result)
@@ -477,8 +486,7 @@ Focus only on the most important text, ignore small labels or background text.""
             # Cleanup
             os.unlink(image_file.name)
             logger.info("✅ Translation processing complete!")
-            
-            # NO auto-clear timer - keep displaying until next submit/translate
+            logger.info("ℹ️  Translation will stay visible until next SUBMIT or TRANSLATE")
             
         except Exception as e:
             logger.error(f"❌ Translation processing error: {e}")
