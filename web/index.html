@@ -323,239 +323,13 @@
     <script>
         console.log('🚀 AURA AI Glasses - Split-Screen: AR + Keyboard');
 
-        // Toggle keyboard feed visibility
-        document.getElementById('toggle-keyboard').addEventListener('click', () => {
-            document.getElementById('keyboard-feed').classList.toggle('hidden');
-        });
-
-        const wrap = document.getElementById('ar-container');  // Three.js on AR side only
+        const wrap = document.getElementById('ar-container');
         const feed = document.getElementById('feed');
         const cards = document.getElementById('cards');
         const status = document.getElementById('status');
         const depthValueEl = document.getElementById('depth-value');
         const mode3dEl = document.getElementById('mode-3d');
         const panels = new Map();
-
-        // Depth smoothing for stable scaling
-        let depthHistory = [];
-        const DEPTH_HISTORY_SIZE = 10;
-        let smoothedCenterDepth = 1.0; // meters
-
-        // Three.js setup for depth occlusion
-        const scene = new THREE.Scene();
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-        wrap.insertBefore(renderer.domElement, cards); // Insert before cards overlay
-
-        let camera, fx = 900, fy = 900, cx = 320, cy = 240, imgW = 640, imgH = 480;
-
-        function setCameraFromIntrinsics() {
-            const fovY = 2 * Math.atan(imgH / (2 * fy)) * 180 / Math.PI;
-            camera = new THREE.PerspectiveCamera(fovY, wrap.clientWidth / wrap.clientHeight, 0.05, 20);
-            camera.position.set(0, 0, 0);
-            camera.lookAt(0, 0, -1);
-        }
-        setCameraFromIntrinsics();
-
-        // Depth mesh for occlusion
-        let depthMesh, gridW = 0, gridH = 0, depthData = null;
-        let depthOcclusionEnabled = true;
-
-        function buildDepthMesh() {
-            if (depthMesh) scene.remove(depthMesh);
-            const geo = new THREE.PlaneGeometry(2, 2, gridW - 1, gridH - 1);
-            const mat = new THREE.MeshBasicMaterial({ color: 0x000000, depthWrite: true, depthTest: true });
-            mat.colorWrite = false; // Pure occluder
-            depthMesh = new THREE.Mesh(geo, mat);
-            depthMesh.frustumCulled = false;
-            scene.add(depthMesh);
-            mode3dEl.textContent = `Active (${gridW}x${gridH})`;
-        }
-
-        // Convert image pixel + depth to 3D camera space
-        function unproject(u, v, Z) {
-            const X = (u - cx) / fx * Z;
-            const Y = -(v - cy) / fy * Z;
-            return new THREE.Vector3(X, Y, -Z);
-        }
-
-        // Update depth mesh vertices
-        function updateDepthMesh() {
-            if (!depthMesh || !depthData || !depthOcclusionEnabled) return;
-            const pos = depthMesh.geometry.attributes.position;
-            let idx = 0;
-            for (let j = 0; j < gridH; j++) {
-                for (let i = 0; i < gridW; i++) {
-                    const Z = depthData[j * gridW + i] || 6.0;
-                    const u = (i + 0.5) * (imgW / gridW);
-                    const v = (j + 0.5) * (imgH / gridH);
-                    const p = unproject(u, v, Math.max(0.05, Math.min(6.0, Z)));
-                    pos.setXYZ(idx, p.x, p.y, p.z);
-                    idx++;
-                }
-            }
-            pos.needsUpdate = true;
-            depthMesh.geometry.computeVertexNormals();
-        }
-
-        // Fetch depth grid from server
-        async function fetchDepth() {
-            try {
-                const r = await fetch('/depth');
-                const j = await r.json();
-                if (j && j.z) {
-                    imgW = j.w; imgH = j.h; fx = j.fx; fy = j.fy; cx = j.cx; cy = j.cy;
-                    if (gridW !== j.gw || gridH !== j.gh) {
-                        gridW = j.gw; gridH = j.gh;
-                        buildDepthMesh();
-                        setCameraFromIntrinsics();
-                    }
-                    depthData = j.z;
-                    updateDepthMesh();
-
-                    // Update and smooth center depth
-                    const centerIdx = Math.floor(gridH / 2) * gridW + Math.floor(gridW / 2);
-                    const rawDepth = depthData[centerIdx];
-                    const smoothed = smoothDepth(rawDepth);
-
-                    depthValueEl.textContent = (smoothed * 100).toFixed(0);
-
-                    // Update all panels with current depth
-                    panels.forEach((el) => {
-                        if (el.style.display !== 'none') {
-                            // Re-apply transform with updated depth
-                            const cornersStr = el.getAttribute('data-corners');
-                            if (cornersStr) {
-                                const corners = JSON.parse(cornersStr);
-                                placePanel3D(el, corners, smoothed);
-                            }
-                        }
-                    });
-                }
-            } catch (e) {
-                console.warn('Depth fetch failed:', e);
-            }
-            setTimeout(fetchDepth, 90);
-        }
-        // Start depth fetching
-        fetchDepth();
-
-        // Smooth depth value to reduce jitter
-        function smoothDepth(newDepth) {
-            if (!isFinite(newDepth) || newDepth <= 0) return smoothedCenterDepth;
-
-            depthHistory.push(newDepth);
-            if (depthHistory.length > DEPTH_HISTORY_SIZE) {
-                depthHistory.shift();
-            }
-
-            // Use median for robustness
-            const sorted = depthHistory.slice().sort((a, b) => a - b);
-            smoothedCenterDepth = sorted[Math.floor(sorted.length / 2)];
-            return smoothedCenterDepth;
-        }
-
-        // Calculate depth-aware scale (0.5x to 2x range)
-        function getDepthScale(depth) {
-            // Reference depth where scale = 1.0 (e.g., 1 meter)
-            const refDepth = 1.0;
-
-            // Calculate raw scale (inverse relationship: closer = bigger)
-            const rawScale = refDepth / Math.max(0.3, depth);
-
-            // Clamp to 0.5x - 2.0x range with smooth interpolation
-            const minScale = 0.5;
-            const maxScale = 2.0;
-            const clampedScale = Math.max(minScale, Math.min(maxScale, rawScale));
-
-            return clampedScale;
-        }
-
-        // Add perspective rotation based on position
-        function calculate3DRotation(corners) {
-            if (!corners || corners.length !== 4) return { rotX: 0, rotY: 0, rotZ: 0 };
-
-            const [tl, tr, br, bl] = corners;
-
-            // Calculate center
-            const cx = (tl[0] + tr[0] + br[0] + bl[0]) / 4;
-            const cy = (tl[1] + tr[1] + br[1] + bl[1]) / 4;
-
-            // Calculate rotation from quad distortion
-            const topWidth = Math.hypot(tr[0] - tl[0], tr[1] - tl[1]);
-            const bottomWidth = Math.hypot(br[0] - bl[0], br[1] - bl[1]);
-            const leftHeight = Math.hypot(bl[0] - tl[0], bl[1] - tl[1]);
-            const rightHeight = Math.hypot(br[0] - tr[0], br[1] - tr[1]);
-
-            // X rotation (pitch) from top/bottom width difference
-            const pitchRatio = (topWidth - bottomWidth) / ((topWidth + bottomWidth) / 2);
-            const rotX = Math.max(-45, Math.min(45, pitchRatio * 60));
-
-            // Y rotation (yaw) from left/right height difference
-            const yawRatio = (leftHeight - rightHeight) / ((leftHeight + rightHeight) / 2);
-            const rotY = Math.max(-35, Math.min(35, yawRatio * 50));
-
-            // Z rotation (roll) from top edge angle
-            const topAngle = Math.atan2(tr[1] - tl[1], tr[0] - tl[0]);
-            const rotZ = topAngle * 180 / Math.PI;
-
-            return { rotX, rotY, rotZ };
-        }
-
-        // Enhanced placement with depth scaling and 3D effects
-        function placePanel3D(el, corners, depthValue = null) {
-            if (!corners || corners.length !== 4) {
-                el.style.display = 'none';
-                return;
-            }
-
-            const ord = orderCorners(corners);
-            const scr = ord.map(([x, y]) => imgToScreen(x, y));
-
-            // Get depth-based scale
-            const depth = depthValue || smoothedCenterDepth;
-            const depthScale = getDepthScale(depth);
-
-            // Calculate 3D rotations
-            const rotation = calculate3DRotation(ord);
-
-            // Base homography matrix
-            const matrix = cssMatrixForQuad(scr, el.offsetWidth || 260, el.offsetHeight || 140);
-
-            // Apply depth scaling and rotation
-            el.style.transform = `
-                ${matrix}
-                scale(${depthScale})
-                rotateX(${rotation.rotX}deg)
-                rotateY(${rotation.rotY}deg)
-                translateZ(${-depth * 50}px)
-            `;
-
-            // Add depth-based opacity (far = slightly transparent)
-            const opacityFactor = Math.max(0.7, Math.min(1.0, 2.0 / depth));
-            el.style.opacity = opacityFactor;
-
-            // Add depth-based blur (far = slight blur)
-            const blurAmount = Math.max(0, Math.min(2, (depth - 1.0) * 0.5));
-            el.style.filter = `blur(${blurAmount}px)`;
-
-            el.style.display = 'block';
-
-            console.log(`3D Transform: depth=${depth.toFixed(2)}m, scale=${depthScale.toFixed(2)}x, rotX=${rotation.rotX.toFixed(1)}°`);
-        }
-
-        function ensurePanel(id, text) {
-            if (!panels.has(id)) {
-                const el = document.createElement('div');
-                el.className = 'card3d';
-                cards.appendChild(el);
-                panels.set(id, el);
-                updatePanels();
-            }
-            const el = panels.get(id);
-            el.innerHTML = text.replace(/\n/g, '<br/>');
-            return el;
-        }
 
         // Adjustable parameters
         const params = {
@@ -570,6 +344,10 @@
             fontSize: 22,
             perspective: 900
         };
+
+        // Three.js setup (optional, for future depth occlusion)
+        let depthOcclusionEnabled = false;
+        mode3dEl.textContent = 'CSS Only';
 
         // Setup control sliders
         function setupControls() {
@@ -590,26 +368,23 @@
                 const el = document.getElementById(id);
                 const valEl = document.getElementById(`val-${id}`);
 
-                el.addEventListener('input', (e) => {
-                    const val = e.target.value;
-                    if (valEl) {
-                        if (id === 'bg-opacity' || id === 'border-opacity') {
-                            valEl.textContent = (val / 100).toFixed(2);
-                        } else {
-                            valEl.textContent = val;
+                if (el) {
+                    el.addEventListener('input', (e) => {
+                        const val = e.target.value;
+                        if (valEl) {
+                            if (id === 'bg-opacity' || id === 'border-opacity') {
+                                valEl.textContent = (val / 100).toFixed(2);
+                            } else {
+                                valEl.textContent = val;
+                            }
                         }
-                    }
-                    controls[id](val);
-                });
+                        controls[id](val);
+                    });
+                }
             });
 
             document.getElementById('toggle-controls').addEventListener('click', () => {
                 document.getElementById('controls').classList.toggle('controls-hidden');
-            });
-
-            document.getElementById('enable-depth-occlusion').addEventListener('change', (e) => {
-                depthOcclusionEnabled = e.target.checked;
-                mode3dEl.textContent = depthOcclusionEnabled ? `Active (${gridW}x${gridH})` : 'Disabled';
             });
         }
 
@@ -636,48 +411,38 @@
         }
 
         function imgToScreen(x, y) {
-            const vw = wrap.clientWidth, vh = wrap.clientHeight;
+            const imgW = 640, imgH = 480;
+            const container = document.getElementById('ar-container');
+            const vw = container.clientWidth, vh = container.clientHeight;
             const s = Math.min(vw / imgW, vh / imgH);
             const dispW = imgW * s, dispH = imgH * s;
             const offX = (vw - dispW) / 2, offY = (vh - dispH) / 2;
-            return [offX + x * s, offY + y * s];
+            return [offX + x * imgW * s, offY + y * imgH * s];
         }
 
-        function orderCorners(pts) {
-            pts = pts.slice();
-            pts.sort((p, q) => (p[1] - q[1]) || (p[0] - q[0]));
-            const tl = pts[0], tr = pts[1];
-            const bl = pts[2], br = pts[3];
-            const top = (tl[0] < tr[0]) ? [tl, tr] : [tr, tl];
-            const bottom = (bl[0] < br[0]) ? [bl, br] : [br, bl];
-            return [top[0], top[1], bottom[1], bottom[0]];
+        function ensurePanel(id, text) {
+            if (!panels.has(id)) {
+                const el = document.createElement('div');
+                el.className = 'card3d';
+                cards.appendChild(el);
+                panels.set(id, el);
+                updatePanels();
+            }
+            const el = panels.get(id);
+            el.innerHTML = text.replace(/\n/g, '<br/>');
+            return el;
         }
 
-        function cssMatrixForQuad(xy, w = 260, h = 140) {
-            const x0 = xy[0][0], y0 = xy[0][1];
-            const x1 = xy[1][0], y1 = xy[1][1];
-            const x2 = xy[2][0], y2 = xy[2][1];
-            const x3 = xy[3][0], y3 = xy[3][1];
+        function placePanel(el, position, location) {
+            const [x, y] = imgToScreen(position.x, position.y);
 
-            const dx1 = x1 - x2, dy1 = y1 - y2;
-            const dx2 = x3 - x2, dy2 = y3 - y2;
-            const sx = x0 - x1 + x2 - x3;
-            const sy = y0 - y1 + y2 - y3;
+            // Simple placement at position
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+            el.style.transform = 'translate(-50%, -50%)';
+            el.style.display = 'block';
 
-            const g = (sx * dy2 - dx2 * sy) / (dx1 * dy2 - dy1 * dx2);
-            const h2 = (dx1 * sy - sx * dy1) / (dx1 * dy2 - dy1 * dx2);
-
-            let a = x1 - x0 + g * x1;
-            let b = x3 - x0 + h2 * x3;
-            let c = x0;
-            let d = y1 - y0 + g * y1;
-            let e = y3 - y0 + h2 * y3;
-            let f = y0;
-            let g1 = g, h1 = h2;
-
-            a /= w; b /= h; d /= w; e /= h; g1 /= w; h1 /= h;
-
-            return `matrix3d(${a}, ${d}, 0, ${g1}, ${b}, ${e}, 0, ${h1}, 0, 0, 1, 0, ${c}, ${f}, 0, 1)`;
+            console.log(`Panel positioned at screen (${x.toFixed(0)}, ${y.toFixed(0)}) from normalized (${position.x}, ${position.y})`);
         }
 
         // Socket.IO connection
@@ -699,76 +464,54 @@
             status.className = 'status-disconnected';
         });
 
-        // Enhanced socket handler with depth info
         socket.on('gemini_result', (result) => {
-            console.log('📡 Gemini result received:', result);
+            console.log('📡 ========== GEMINI RESULT RECEIVED ==========');
+            console.log('Full result:', result);
+            console.log('==============================================');
 
+            // Update status text
+            status.innerHTML =
+                `<strong>Q:</strong> ${result.transcription}<br>` +
+                `<strong>A:</strong> ${result.answer}<br>` +
+                `<strong>Object:</strong> ${result.object}<br>` +
+                `<strong>Location:</strong> ${result.location}`;
+            status.className = 'status-connected';
+
+            // Create/update 3D text panel
             const overlays = [{
                 id: 1,
-                text: `${result.answer}\n[${result.object}]`,
-                corners: result.corners || generateCornersFromPosition(result.position, result.location),
-                depth: result.position?.z || smoothedCenterDepth
+                text: `${result.answer}\n\n[${result.object}]`,
+                position: result.position,
+                location: result.location
             }];
 
             const live = new Set();
             overlays.forEach(o => {
-                const text = o.text || o.label || '…';
-                const el = ensurePanel(o.id || 0, text);
-
-                // Store corners for depth updates
-                el.setAttribute('data-corners', JSON.stringify(o.corners));
-
-                placePanel3D(el, o.corners, o.depth);
+                const el = ensurePanel(o.id || 0, o.text);
+                placePanel(el, o.position, o.location);
                 live.add(o.id || 0);
             });
 
+            // Hide stale panels
             panels.forEach((el, id) => {
-                if (!live.has(id)) el.style.display = 'none';
+                if (!live.has(id)) {
+                    el.style.display = 'none';
+                }
             });
+
+            console.log('✅ Panel displayed successfully');
+
+            // Auto-hide after 15 seconds
+            setTimeout(() => {
+                panels.forEach(el => el.style.display = 'none');
+                console.log('🗑️ Panel auto-hidden after timeout');
+            }, 15000);
         });
 
-        function generateCornersFromPosition(position, location) {
-            const locationMap = {
-                'top-left': [0.20, 0.20],
-                'top-center': [0.50, 0.20],
-                'top-right': [0.80, 0.20],
-                'center-left': [0.20, 0.50],
-                'center': [0.50, 0.50],
-                'center-right': [0.80, 0.50],
-                'bottom-left': [0.20, 0.80],
-                'bottom-center': [0.50, 0.80],
-                'bottom-right': [0.80, 0.80]
-            };
-
-            const [nx, ny] = locationMap[location] || [0.5, 0.5];
-            const cx = nx * imgW;
-            const cy = ny * imgH;
-
-            const size = 100;
-            return [
-                [cx - size, cy - size],
-                [cx + size, cy - size],
-                [cx + size, cy + size],
-                [cx - size, cy + size]
-            ];
-        }
-
-        // Three.js render loop
-        function tick() {
-            requestAnimationFrame(tick);
-            renderer.render(scene, camera);
-        }
-        tick();
-
-        // Window resize handler
-        function onResize() {
-            renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-            setCameraFromIntrinsics();
-        }
-        addEventListener('resize', onResize);
-
-        // Initialize controls and start render loop
+        // Initialize
         setupControls();
+        cards.style.perspective = `${params.perspective}px`;
+
         console.log('✅ Split-screen initialized: 50/50 AR + Keyboard feeds');
     </script>
 </body>
