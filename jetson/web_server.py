@@ -581,16 +581,21 @@ class WebServer:
         return location_map.get(location.lower(), (int(frame_width * 0.5), int(frame_height * 0.5)))
     
     def _generate_clean_frames(self):
-        """Generate clean JPEG frames WITHOUT overlays for AR visualization"""
+        """Generate JPEG frames for AR feed WITH distance overlay (no keyboard)"""
         while True:
-            # Get raw left frame only
-            frame_left, _, _ = self.camera_manager.get_frames()
+            # Get AR frame with distance overlay
+            frame = self.camera_manager.get_ar_frame()
             
-            if frame_left is not None:
+            # Fallback to raw left frame if no AR frame
+            if frame is None:
+                frame_left, _, _ = self.camera_manager.get_frames()
+                frame = frame_left
+            
+            if frame is not None:
                 # Encode frame as JPEG
-                ret, buffer = cv2.imencode('.jpg', frame_left, 
+                ret, buffer = cv2.imencode('.jpg', frame, 
                                           [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = buffer.tobytes();
+                frame_bytes = buffer.tobytes()
                 
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')

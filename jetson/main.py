@@ -359,14 +359,18 @@ class AURAGlasses:
                                            args=(frame_left, frame_right, depth_map),
                                            daemon=True).start()
                     
-                    # No OCR overlay drawing - translation results shown via web only
-                    
-                    # Draw tape measure overlay (not on keyboard feed)
-                    if self.use_tape_measure and self.tape_measure:
-                        display_frame = self.tape_measure.draw_overlay(display_frame)
-                    
-                    # Store processed frame for web streaming (keyboard feed)
+                    # Store keyboard feed with overlays (for /keyboard_feed)
                     self.camera.set_processed_frame(display_frame)
+                    
+                    # Create clean AR feed with distance overlay (for /video_feed)
+                    ar_frame = frame_left.copy()
+                    
+                    # Add distance overlay to AR frame (not keyboard frame)
+                    if self.use_tape_measure and self.tape_measure:
+                        ar_frame = self.tape_measure.draw_overlay(ar_frame)
+                    
+                    # Store AR frame for clean video feed
+                    self.camera.set_ar_frame(ar_frame)
                     
                     # Show single camera view (ONLY if not headless)
                     if not self.headless:

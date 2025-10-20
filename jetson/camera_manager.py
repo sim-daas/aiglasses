@@ -10,7 +10,8 @@ class StereoCamera:
         self.frame_left = None
         self.frame_right = None
         self.depth_map = None
-        self.processed_frame = None  # For web display with overlays
+        self.processed_frame = None  # For keyboard feed with gestures
+        self.ar_frame = None  # For clean AR feed with distance overlay
         self.lock = threading.Lock()  # Changed from frame_lock to lock for consistency
         
         # Stereo matcher
@@ -128,14 +129,24 @@ class StereoCamera:
             return float(np.mean(region))
     
     def set_processed_frame(self, frame):
-        """Store processed frame with overlays for web streaming"""
+        """Store processed frame with overlays for keyboard feed"""
         with self.lock:
             self.processed_frame = frame.copy() if frame is not None else None
     
     def get_processed_frame(self):
-        """Get processed frame for web streaming"""
+        """Get processed frame for keyboard feed"""
         with self.lock:
             return self.processed_frame.copy() if self.processed_frame is not None else None
+    
+    def set_ar_frame(self, frame):
+        """Store AR frame with distance overlay for clean video feed"""
+        with self.lock:
+            self.ar_frame = frame.copy() if frame is not None else None
+    
+    def get_ar_frame(self):
+        """Get AR frame for clean video feed"""
+        with self.lock:
+            return self.ar_frame.copy() if self.ar_frame is not None else None
     
     def stop(self):
         """Stop camera capture"""
