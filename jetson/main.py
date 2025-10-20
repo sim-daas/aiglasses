@@ -445,19 +445,44 @@ class AURAGlasses:
             
             logger.info("📸 Frame captured, sending to Gemini for translation...")
             
-            # Create concise translation prompt - output only English
-            translation_query = """Look at this image and identify the MAIN or MOST PROMINENT text visible. 
-Provide ONLY the English translation in a clear, natural sentence format.
-Do not include the original text, language name, or any formatting.
-Just provide the translated English text as it would naturally be read.
-If the text is already in English, just provide the text as-is.
-Focus only on the most important text, ignore small labels or background text."""
+            # Updated translation prompt to get both original and translation
+            translation_query = """Look at this image and identify the MAIN or MOST PROMINENT text visible.
+Provide your response in exactly this format (use these exact labels):
+ORIGINAL: [the exact original text as written]
+TRANSLATION: [the English translation]
+
+Rules:
+- Keep ORIGINAL text exactly as it appears, in its original language
+- If already in English, still show it in ORIGINAL and repeat in TRANSLATION
+- Focus only on the most important text, ignore small labels
+- Do not add any other commentary or formatting"""
             
             # Process with Gemini
             result = self.gemini.process_multimodal_query(
                 image_path=image_file.name,
                 text_query=translation_query
             )
+            
+            # Parse the response to extract original and translation
+            answer = result['answer']
+            original_text = ""
+            translation_text = ""
+            
+            # Try to parse ORIGINAL: and TRANSLATION: format
+            if "ORIGINAL:" in answer and "TRANSLATION:" in answer:
+                parts = answer.split("TRANSLATION:")
+                original_part = parts[0].replace("ORIGINAL:", "").strip()
+                translation_part = parts[1].strip()
+                original_text = original_part
+                translation_text = translation_part
+            else:
+                # Fallback: use the whole answer as translation
+                original_text = "Text detected"
+                translation_text = answer
+            
+            # Store original text in result
+            result['original_text'] = original_text
+            result['answer'] = translation_text  # English translation
             
             # Force center-bottom location for translation
             result['location'] = 'bottom-center'
@@ -476,7 +501,8 @@ Focus only on the most important text, ignore small labels or background text.""
             result['type'] = 'translation'
             
             logger.info("📊 TRANSLATION RESULTS:")
-            logger.info(f"   A: {result['answer']}")
+            logger.info(f"   Original: {original_text}")
+            logger.info(f"   Translation: {translation_text}")
             logger.info(f"   Location: bottom-center (forced)")
             
             # Broadcast to web clients

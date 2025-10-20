@@ -497,59 +497,6 @@ class WebServer:
                 mimetype='multipart/x-mixed-replace; boundary=frame'
             )
         
-        @self.app.route('/test_query', methods=['POST'])
-        def test_query():
-            """Test endpoint to trigger default Gemini query"""
-            try:
-                data = request.get_json() or {}
-                query = data.get('query', 'What objects do you see in this image?')
-                
-                logger.info(f"🧪 Test query received: '{query}'")
-                
-                # Get current frame
-                frame_left, frame_right, depth_map = self.camera_manager.get_frames()
-                
-                if frame_left is None:
-                    return jsonify({'error': 'No camera frame available'}), 500
-                
-                # Save frame to temporary file
-                import tempfile
-                image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
-                cv2.imwrite(image_file.name, frame_right)
-                
-                # Import and use Gemini client
-                from gemini_client import GeminiClient
-                gemini = GeminiClient()
-                
-                result = gemini.process_multimodal_query(
-                    image_path=image_file.name,
-                    text_query=query
-                )
-                
-                # Add depth info
-                from config import Config
-                pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
-                pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
-                depth_value = self.camera_manager.get_depth_at_point(pos_x, pos_y)
-                
-                result['position']['z'] = depth_value
-                result['position']['depth_normalized'] = depth_value
-                
-                # Broadcast result
-                self.broadcast_result(result)
-                
-                # Cleanup
-                import os
-                os.unlink(image_file.name)
-                
-                return jsonify({'success': True, 'result': result})
-                
-            except Exception as e:
-                logger.error(f"❌ Test query error: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                return jsonify({'error': str(e)}), 500
-        
         @self.app.route('/data')
         def get_data():
             if self.latest_result:
@@ -595,7 +542,7 @@ class WebServer:
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame, 
                                           [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = buffer.tobytes()
+                frame_bytes = buffer.tobytes();
                 
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
