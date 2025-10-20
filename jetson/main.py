@@ -30,6 +30,7 @@ from audio_manager import AudioManager
 from gemini_client import GeminiClient
 from web_server import WebServer
 from config import Config
+from text_3d_renderer import Text3DRenderer
 
 class AURAGlasses:
     def __init__(self, test_mode=False):
@@ -58,6 +59,10 @@ class AURAGlasses:
         self.recording = False
         self.test_mode = test_mode
         self.current_result = None  # Store latest result for overlay
+        
+        # Initialize 3D text renderer
+        logger.info("Initializing 3D text renderer...")
+        self.text_renderer = Text3DRenderer()
         
         logger.info("✅ AURA AI Glasses initialized!")
         
@@ -228,6 +233,72 @@ class AURAGlasses:
             import traceback
             logger.error(traceback.print_exc())
     
+    def _map_location_to_position(self, location, frame_width, frame_height):
+        """Map grid location to pixel coordinates"""
+        location_map = {
+            'top-left': (int(frame_width * 0.15), int(frame_height * 0.15)),
+            'top-center': (int(frame_width * 0.5), int(frame_height * 0.15)),
+            'top-right': (int(frame_width * 0.85), int(frame_height * 0.15)),
+            'center-left': (int(frame_width * 0.15), int(frame_height * 0.5)),
+            'center': (int(frame_width * 0.5), int(frame_height * 0.5)),
+            'center-right': (int(frame_width * 0.85), int(frame_height * 0.5)),
+            'bottom-left': (int(frame_width * 0.15), int(frame_height * 0.85)),
+            'bottom-center': (int(frame_width * 0.5), int(frame_height * 0.85)),
+            'bottom-right': (int(frame_width * 0.85), int(frame_height * 0.85)),
+        }
+        return location_map.get(location, (int(frame_width * 0.5), int(frame_height * 0.5)))
+    
+    def _draw_3d_text_overlay(self, frame, result):
+        """Draw TRUE 3D text overlay with depth layers on the stereo feed"""
+        if not result:
+            return frame
+        
+        h, w = frame.shape[:2]
+        
+        # Get location from result
+        location = result.get('location', 'center')
+        x, y = self._map_location_to_position(location, w, h)
+        
+        # Get answer and depth
+        answer = result['answer']
+        object_name = result['object']
+        
+        # Get depth value (0-1 normalized) and scale for 3D effect
+        # Closer objects (lower depth) should have larger text
+        depth_value = result.get('position', {}).get('z', 0.5)
+        
+        # Convert depth to z_depth parameter for renderer
+        # Map depth_value (0-1) to z_depth (1-20) - inverse relationship
+        # Closer objects (depth=0) -> z_depth=1 (larger text)
+        # Further objects (depth=1) -> z_depth=20 (smaller text)
+        z_depth = 1.0 + (1.0 - depth_value) * 19.0
+        
+        # Render answer with 3D effect
+        logger.info(f"Rendering 3D text at ({x}, {y}) with z_depth={z_depth:.2f}")
+        frame = self.text_renderer.render_3d_text(
+            frame, 
+            answer, 
+            (x, y), 
+            z_depth=z_depth
+        )
+        
+        # Render object label below with smaller depth
+        label_text = f"[{object_name}]"
+        label_y = y + 60  # Offset below answer
+        
+        frame = self.text_renderer.render_3d_text(
+            frame,
+            label_text,
+            (x, label_y),
+            z_depth=z_depth * 0.7  # Slightly less prominent
+        )
+        
+        # Draw location indicator dot
+        cv2.circle(frame, (x, y - 20), 5, (0, 255, 0), -1)
+        cv2.circle(frame, (x, y - 20), 7, (255, 255, 255), 1)
+        
+        return frame
+    
     def run(self):
         """Run the main application"""
         # Start web server in separate thread
@@ -258,10 +329,19 @@ class AURAGlasses:
                 if frame_left is not None:
                     frame_count += 1
                     
-                    # NO OVERLAY - just show raw stereo feed
-                    stereo_view = cv2.hconcat([frame_left, frame_right])
+                    # Create copies for overlay
+                    display_left = frame_left.copy()
+                    display_right = frame_right.copy()
                     
-                    # Add frame counter only
+                    # Add 3D text overlay if we have results
+                    if self.current_result:
+                        display_left = self._draw_3d_text_overlay(display_left, self.current_result)
+                        display_right = self._draw_3d_text_overlay(display_right, self.current_result)
+                    
+                    # Show stereo view with overlays
+                    stereo_view = cv2.hconcat([display_left, display_right])
+                    
+                    # Add frame counter
                     cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     
