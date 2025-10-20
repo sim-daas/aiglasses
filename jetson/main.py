@@ -12,7 +12,7 @@ import os
 import cv2
 import logging
 
-# Setup logging
+# Setup logging FIRST (before any logging calls)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -37,13 +37,7 @@ try:
     GESTURE_KB_AVAILABLE = True
 except ImportError:
     GESTURE_KB_AVAILABLE = False
-    logger.warning("⚠️  Gesture keyboard not available")
-
-try:
-    import RPi.GPIO as GPIO
-    GPIO_AVAILABLE = True
-except ImportError:
-    GPIO_AVAILABLE = False
+    logger.warning("⚠️  Gesture keyboard not available. Install with: pip install mediapipe")
 
 class AURAGlasses:
     def __init__(self, test_mode=False, use_gesture_kb=False):
@@ -76,9 +70,14 @@ class AURAGlasses:
         self.text_renderer = Text3DRenderer()
         
         # Initialize gesture keyboard if requested
-        if use_gesture_kb and GESTURE_KB_AVAILABLE:
-            logger.info("Initializing gesture keyboard...")
-            self.gesture_keyboard = GestureKeyboard()
+        if use_gesture_kb:
+            if GESTURE_KB_AVAILABLE:
+                logger.info("Initializing gesture keyboard...")
+                self.gesture_keyboard = GestureKeyboard()
+            else:
+                logger.error("❌ Gesture keyboard requested but MediaPipe not available!")
+                logger.error("   Install with: pip install mediapipe")
+                sys.exit(1)
         
         logger.info("✅ AURA AI Glasses initialized!")
         
