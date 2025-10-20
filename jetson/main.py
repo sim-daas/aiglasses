@@ -30,7 +30,7 @@ from audio_manager import AudioManager
 from gemini_client import GeminiClient
 from web_server import WebServer
 from config import Config
-from text_3d_renderer import Text3DRenderer
+from opengl_text_renderer import OpenGLTextRenderer
 
 class AURAGlasses:
     def __init__(self, test_mode=False):
@@ -60,9 +60,12 @@ class AURAGlasses:
         self.test_mode = test_mode
         self.current_result = None  # Store latest result for overlay
         
-        # Initialize 3D text renderer
-        logger.info("Initializing 3D text renderer...")
-        self.text_renderer = Text3DRenderer()
+        # Initialize OpenGL 3D text renderer instead of PIL-based one
+        logger.info("Initializing OpenGL 3D text renderer...")
+        self.text_renderer = OpenGLTextRenderer(
+            frame_width=Config.SINGLE_CAM_WIDTH,
+            frame_height=Config.SINGLE_CAM_HEIGHT
+        )
         
         logger.info("✅ AURA AI Glasses initialized!")
         
@@ -249,53 +252,59 @@ class AURAGlasses:
         return location_map.get(location, (int(frame_width * 0.5), int(frame_height * 0.5)))
     
     def _draw_3d_text_overlay(self, frame, result):
-        """Draw TRUE 3D text overlay with depth layers on the stereo feed"""
+        """Draw TRUE 3D text with depth using OpenGL"""
         if not result:
             return frame
         
         h, w = frame.shape[:2]
         
-        # Get location from result
+        # Get location from Gemini
         location = result.get('location', 'center')
-        x, y = self._map_location_to_position(location, w, h)
+        location_map = {
+            'top-left': (0.15, 0.15),
+            'top-center': (0.5, 0.15),
+            'top-right': (0.85, 0.15),
+            'center-left': (0.15, 0.5),
+            'center': (0.5, 0.5),
+            'center-right': (0.85, 0.5),
+            'bottom-left': (0.15, 0.85),
+            'bottom-center': (0.5, 0.85),
+            'bottom-right': (0.85, 0.85),
+        }
         
-        # Get answer and depth
-        answer = result['answer']
-        object_name = result['object']
+        rel_x, rel_y = location_map.get(location, (0.5, 0.5))
+        pixel_x = int(rel_x * w)
+        pixel_y = int(rel_y * h)
         
-        # Get depth value (0-1 normalized) and scale for 3D effect
-        # Closer objects (lower depth) should have larger text
-        depth_value = result.get('position', {}).get('z', 0.5)
+        # Get depth from stereo (normalized 0-1)
+        depth_normalized = result.get('position', {}).get('z', 0.5)
         
-        # Convert depth to z_depth parameter for renderer
-        # Map depth_value (0-1) to z_depth (1-20) - inverse relationship
-        # Closer objects (depth=0) -> z_depth=1 (larger text)
-        # Further objects (depth=1) -> z_depth=20 (smaller text)
-        z_depth = 1.0 + (1.0 - depth_value) * 19.0
+        # Convert to meters (assume 0.5-3.0 meter range)
+        depth_meters = 0.5 + depth_normalized * 2.5
         
-        # Render answer with 3D effect
-        logger.info(f"Rendering 3D text at ({x}, {y}) with z_depth={z_depth:.2f}")
-        frame = self.text_renderer.render_3d_text(
-            frame, 
-            answer, 
-            (x, y), 
-            z_depth=z_depth
+        # Calculate 3D world position
+        world_pos = self.text_renderer.world_position_from_depth(
+            pixel_x, pixel_y, depth_meters
         )
         
-        # Render object label below with smaller depth
-        label_text = f"[{object_name}]"
-        label_y = y + 60  # Offset below answer
-        
+        # Render answer text with 3D depth
+        answer = result['answer']
         frame = self.text_renderer.render_3d_text(
             frame,
-            label_text,
-            (x, label_y),
-            z_depth=z_depth * 0.7  # Slightly less prominent
+            answer,
+            world_pos,
+            size=0.3  # Size in meters
         )
         
-        # Draw location indicator dot
-        cv2.circle(frame, (x, y - 20), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (x, y - 20), 7, (255, 255, 255), 1)
+        # Render label below
+        object_name = result['object']
+        label_world_pos = (world_pos[0], world_pos[1] - 0.2, world_pos[2])
+        frame = self.text_renderer.render_3d_text(
+            frame,
+            f"[{object_name}]",
+            label_world_pos,
+            size=0.15
+        )
         
         return frame
     
