@@ -30,6 +30,7 @@ from gemini_client import GeminiClient
 from web_server import WebServer
 from config import Config
 from text_3d_renderer import Text3DRenderer
+from depth_tape_measure import DepthTapeMeasure
 
 # Conditional imports
 try:
@@ -40,7 +41,7 @@ except ImportError:
     logger.warning("⚠️  Gesture keyboard not available. Install with: pip install mediapipe")
 
 class AURAGlasses:
-    def __init__(self, test_mode=False, use_gesture_kb=False):
+    def __init__(self, test_mode=False, use_gesture_kb=False, use_tape_measure=False):
         logger.info("🚀 Initializing AURA AI Glasses...")
         
         # Initialize components
@@ -62,8 +63,10 @@ class AURAGlasses:
         # State
         self.test_mode = test_mode
         self.use_gesture_kb = use_gesture_kb
+        self.use_tape_measure = use_tape_measure
         self.current_result = None
         self.gesture_keyboard = None
+        self.tape_measure = None
         
         # Initialize 3D text renderer
         logger.info("Initializing 3D text renderer...")
@@ -79,6 +82,16 @@ class AURAGlasses:
                 logger.error("   Install with: pip install mediapipe")
                 sys.exit(1)
         
+        # Initialize tape measure if requested
+        if use_tape_measure:
+            logger.info("Initializing AR tape measure...")
+            self.tape_measure = DepthTapeMeasure(
+                baseline_mm=65,  # Adjust for your stereo setup
+                focal_px=900,    # Adjust based on your cameras
+                frame_width=Config.SINGLE_CAM_WIDTH,
+                frame_height=Config.SINGLE_CAM_HEIGHT
+            )
+        
         logger.info("✅ AURA AI Glasses initialized!")
         
         logger.info("\n📝 Instructions:")
@@ -87,10 +100,11 @@ class AURAGlasses:
             logger.info("   - Press 't' to send TEST query")
         elif use_gesture_kb:
             logger.info("   - Use hand gestures to type query")
-            logger.info("   - Pinch + move = select letter")
-            logger.info("   - Two fingers = space")
-            logger.info("   - Open palm (hold) = backspace")
-            logger.info("   - Three fingers (hold) = submit")
+        if use_tape_measure:
+            logger.info("   - Press '1' to set point 1")
+            logger.info("   - Press '2' to set point 2")
+            logger.info("   - Press 'a' to place arrow")
+            logger.info("   - Press 'r' to reset measurements")
         logger.info("   - Press Q to quit\n")
     
     def process_test_query(self):
@@ -256,18 +270,42 @@ class AURAGlasses:
             logger.info("✋ GESTURE KEYBOARD MODE")
             logger.info("Use hand gestures to type, 'q' to quit\n")
         
+        if self.use_tape_measure:
+            logger.info("📏 AR TAPE MEASURE ENABLED")
+            logger.info("Click or use keys to measure distances\n")
+        
+        # Mouse callback for tape measure
+        if self.use_tape_measure:
+            def mouse_callback(event, x, y, flags, param):
+                if event == cv2.EVENT_LBUTTONDOWN:
+                    if self.tape_measure.point1 is None:
+                        self.tape_measure.set_point1(x, y)
+                    elif self.tape_measure.point2 is None:
+                        self.tape_measure.set_point2(x, y)
+                    else:
+                        self.tape_measure.set_point1(x, y)
+                        self.tape_measure.point2 = None
+                elif event == cv2.EVENT_RBUTTONDOWN:
+                    self.tape_measure.set_arrow(x, y)
+            
+            cv2.setMouseCallback('AURA AI Glasses', mouse_callback)
+        
         try:
             frame_count = 0
             
             while True:
                 # Get frames
-                frame_left, frame_right, _ = self.camera.get_frames()
+                frame_left, frame_right, depth_map = self.camera.get_frames()
                 
                 if frame_left is not None:
                     frame_count += 1
                     
                     # Use only left camera for display
                     display_frame = frame_left.copy()
+                    
+                    # Compute depth map for tape measure
+                    if self.use_tape_measure and frame_right is not None:
+                        self.tape_measure.compute_depth(frame_left, frame_right)
                     
                     # Process gesture keyboard if enabled
                     if self.use_gesture_kb and self.gesture_keyboard:
@@ -295,7 +333,9 @@ class AURAGlasses:
                             if query:
                                 self.process_gesture_query(query)
                     
-                    # NO OpenCV text overlay - using web-based CSS 3D overlay instead
+                    # Draw tape measure overlay if enabled
+                    if self.use_tape_measure:
+                        display_frame = self.tape_measure.draw_overlay(display_frame)
                     
                     # Add frame counter
                     cv2.putText(display_frame, f"Frame: {frame_count}", (10, 30),
@@ -311,6 +351,18 @@ class AURAGlasses:
                 elif key == ord('q'):
                     logger.info("'q' pressed - shutting down")
                     break
+                elif key == ord('1') and self.use_tape_measure:
+                    # Set point 1 at center
+                    self.tape_measure.set_point1(self.tape_measure.cx, self.tape_measure.cy)
+                elif key == ord('2') and self.use_tape_measure:
+                    # Set point 2 at center
+                    self.tape_measure.set_point2(self.tape_measure.cx, self.tape_measure.cy)
+                elif key == ord('a') and self.use_tape_measure:
+                    # Place arrow at center
+                    self.tape_measure.set_arrow(self.tape_measure.cx, self.tape_measure.cy)
+                elif key == ord('r') and self.use_tape_measure:
+                    # Reset measurements
+                    self.tape_measure.clear_measurements()
                 
                 time.sleep(0.01)
         
@@ -337,11 +389,17 @@ def main():
                        help='Enable test mode (hardcoded queries)')
     parser.add_argument('--gesture', action='store_true',
                        help='Enable gesture keyboard mode')
+    parser.add_argument('--measure', action='store_true',
+                       help='Enable AR tape measure mode')
     
     args = parser.parse_args()
     
     try:
-        app = AURAGlasses(test_mode=args.test, use_gesture_kb=args.gesture)
+        app = AURAGlasses(
+            test_mode=args.test,
+            use_gesture_kb=args.gesture,
+            use_tape_measure=args.measure
+        )
         app.run()
     except Exception as e:
         logger.error(f"❌ Fatal error: {e}")
