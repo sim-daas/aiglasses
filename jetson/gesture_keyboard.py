@@ -164,28 +164,44 @@ class GestureKeyboard:
         # Process hand detection
         results = self.hands.process(rgb)
         
-        # Create overlay
+        # Create overlay - ALWAYS CREATE IT
         overlay = frame.copy()
         
-        # Draw UI
+        # Draw UI - ALWAYS VISIBLE
         cx, cy = w // 2, h // 2
         radius_ui = int(min(w, h) * 0.35)
         
-        # Draw pie sectors
+        # Draw pie circle (main compass)
         cv2.circle(overlay, (cx, cy), radius_ui, (60, 60, 60), 2)
-        for _, ang in self.SECTORS:
+        
+        # Draw sector spokes
+        for sector_name, ang in self.SECTORS:
             a = math.radians(ang)
             x2 = int(cx + radius_ui * math.cos(a))
             y2 = int(cy - radius_ui * math.sin(a))
             cv2.line(overlay, (cx, cy), (x2, y2), (50, 50, 50), 1)
+            
+            # Draw sector labels
+            label_radius = int(radius_ui * 1.15)
+            x_label = int(cx + label_radius * math.cos(a))
+            y_label = int(cy - label_radius * math.sin(a))
+            cv2.putText(overlay, sector_name, (x_label - 20, y_label),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
         
-        # Draw text display
+        # Draw text display box (at top)
         cur_text = self.typed_text if len(self.typed_text) < 36 else "…" + self.typed_text[-35:]
         cv2.rectangle(overlay, (20, 20), (w - 20, 80), (10, 10, 10), -1)
-        cv2.putText(overlay, cur_text, (30, 65), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200, 255, 200), 2)
+        cv2.rectangle(overlay, (20, 20), (w - 20, 80), (100, 100, 100), 2)
         
-        status = "Idle"
+        # Show typed text
+        if cur_text:
+            cv2.putText(overlay, cur_text, (30, 65), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+        else:
+            cv2.putText(overlay, "Type with gestures...", (30, 65),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (100, 100, 100), 2)
+        
+        status = "Show hand to start typing"
         should_submit = False
         
         # Process hand landmarks
@@ -221,7 +237,9 @@ class GestureKeyboard:
                 self.pinch_down = True
                 self.pinch_start_time = time.time()
                 self.selected_group = self._sector_from_angle(theta)
-                logger.info(f"Pinch started: {self.selected_group}")
+                if self.selected_group:
+                    logger.info(f"✋ Pinch started: {self.selected_group}")
+                    status = f"Selected: {self.selected_group}"
             
             elif not is_pinch and self.pinch_down:
                 # Commit letter on release
@@ -259,9 +277,11 @@ class GestureKeyboard:
             if three:
                 if self.three_hold_start is None:
                     self.three_hold_start = now
+                    status = "Hold to submit..."
                 elif now - self.three_hold_start >= self.SUBMIT_HOLD_S:
                     should_submit = True
-                    status = "Submit!"
+                    status = "✓ SUBMITTING!"
+                    logger.info(f"✋ Submitting: '{self.typed_text}'")
                     self.three_hold_start = None
             else:
                 self.three_hold_start = None
@@ -286,8 +306,12 @@ class GestureKeyboard:
             # No hand detected
             self.pinch_down = False
             self.selected_group = None
+            
+            # Show help text
+            cv2.putText(overlay, status, (20, h - 20),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
         
-        # Blend UI
+        # Blend UI (make it semi-transparent)
         frame = cv2.addWeighted(overlay, 0.92, frame, 0.08, 0)
         
         return frame, status, should_submit

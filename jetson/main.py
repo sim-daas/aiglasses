@@ -298,27 +298,43 @@ class AURAGlasses:
                 
                 if frame_left is not None:
                     frame_count += 1
-                    display_left = frame_left.copy()
-                    display_right = frame_right.copy()
                     
                     # Process gesture keyboard if enabled
                     if self.use_gesture_kb and self.gesture_keyboard:
-                        display_left, status, should_submit = self.gesture_keyboard.process_frame(display_left)
+                        # Process gesture keyboard on LEFT camera with overlay
+                        display_left, status, should_submit = self.gesture_keyboard.process_frame(frame_left.copy())
+                        
+                        # Copy right camera without gesture UI
+                        display_right = frame_right.copy()
                         
                         if should_submit:
                             query = self.gesture_keyboard.get_text().strip()
                             if query:
                                 self.process_gesture_query(query)
+                    else:
+                        # Normal mode - just copy frames
+                        display_left = frame_left.copy()
+                        display_right = frame_right.copy()
                     
-                    # Add 3D text overlay if we have results
+                    # Add 3D text overlay if we have results (on BOTH cameras)
                     if self.current_result:
                         display_left = self._draw_3d_text_overlay(display_left, self.current_result)
                         display_right = self._draw_3d_text_overlay(display_right, self.current_result)
                     
                     # Show stereo view
                     stereo_view = cv2.hconcat([display_left, display_right])
-                    cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    
+                    # Add mode indicator
+                    if self.use_gesture_kb:
+                        mode_text = "GESTURE KEYBOARD MODE - Left: Gesture UI | Right: Clean"
+                        cv2.putText(stereo_view, mode_text, (10, 30),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                        cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 60),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    else:
+                        cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 30),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    
                     cv2.imshow('AURA AI - Stereo Camera', stereo_view)
                 
                 key = cv2.waitKey(1) & 0xFF
