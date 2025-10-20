@@ -3,44 +3,6 @@
 AI Glasses Pipeline
 Complete pipeline combining stereo vision, voice recognition, AI vision analysis, and 3D object detection
 """
-
-import os
-import cv2
-import numpy as np
-import tkinter as tk
-from tkinter import ttk, messagebox
-import threading
-import queue
-import time
-import json
-import tempfile
-import wave
-import pyaudio
-from PIL import Image, ImageTk, ImageDraw, ImageFont
-import google.generativeai as genai
-from deepgram import DeepgramClient, PrerecordedOptions, FileSource
-from dotenv import load_dotenv
-import subprocess
-import sys
-from pathlib import Path
-
-# Import custom modules
-try:
-    from visionapi import VisionAPI
-    from bbox3d_utils import BBox3DEstimator, BirdEyeView
-except ImportError as e:
-    print(f"Warning: Could not import vision modules: {e}")
-    print("Make sure visionapi.py and bbox3d_utils.py are in the same directory")
-
-# Try to import NanoOwl components (optional)
-try:
-    from owl_predict import OwlPredictor
-    NANOOWL_AVAILABLE = True
-except ImportError:
-    print("Warning: NanoOwl not available, will use fallback detection")
-    OwlPredictor = None
-    NANOOWL_AVAILABLE = False
-
 import os
 import cv2
 import numpy as np

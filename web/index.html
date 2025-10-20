@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AURA AI Glasses</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+
+<body>
+    <div id="container">
+        <!-- Video feed -->
+        <img id="video-feed" src="/video_feed" alt="Camera Feed">
+
+        <!-- 3D Canvas overlay -->
+        <canvas id="three-canvas"></canvas>
+
+        <!-- Status overlay -->
+        <div id="status-overlay">
+            <div id="status-text">Connecting...</div>
+            <div id="query-text"></div>
+            <div id="answer-container">
+                <div id="answer-text"></div>
+            </div>
+        </div>
+
+        <!-- Audio player (hidden) -->
+        <audio id="audio-player" autoplay></audio>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

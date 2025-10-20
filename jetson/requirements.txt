@@ -1,0 +1,26 @@
+# Core dependencies
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+numpy>=1.24.0
+pillow>=10.0.0
+
+# Flask web server
+flask>=3.0.0
+flask-socketio>=5.3.0
+flask-cors>=4.0.0
+python-socketio>=5.10.0
+eventlet>=0.33.0
+
+# Audio processing
+pyaudio>=0.2.13
+sounddevice>=0.4.6
+scipy>=1.11.0
+
+# Google Gemini API
+google-generativeai>=0.3.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Utilities
+requests>=2.31.0
