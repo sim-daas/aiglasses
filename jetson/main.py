@@ -96,8 +96,8 @@ class AURAGlasses:
             cv2.imwrite(image_file.name, frame_right)
             logger.info(f"✅ Frame saved to: {image_file.name}")
             
-            # Hardcoded test query
-            test_query = "What objects do you see in this image?"
+            # Hardcoded test query - CHANGED
+            test_query = "What is the capacity of the water bottle?"
             logger.info(f"Step 3/6: Using test query: '{test_query}'")
             
             # Process with Gemini
