@@ -422,9 +422,7 @@ class AURAGlasses:
                     if self.use_tape_measure and self.tape_measure:
                         display_frame = self.tape_measure.draw_overlay(display_frame)
                     
-                    # Add frame counter
-                    cv2.putText(display_frame, f"Frame: {frame_count}", (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    # Frame counter removed - no longer displayed
                     
                     # Store processed frame for web streaming (with all overlays)
                     self.camera.set_processed_frame(display_frame)
