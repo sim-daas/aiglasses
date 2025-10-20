@@ -280,6 +280,11 @@ class AURAGlasses:
                     logger.info("'q' pressed - shutting down")
                     break
                 
+                elif key == ord('b') and self.test_mode:
+                    # Broadcast test message
+                    logger.info("'b' pressed - broadcasting test message")
+                    self.server.test_broadcast()
+                
                 time.sleep(0.01)
         
         except KeyboardInterrupt:

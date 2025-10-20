@@ -1,4 +1,4 @@
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, render_template, Response, jsonify, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import cv2
@@ -32,8 +32,17 @@ class WebServer:
                         template_folder=web_dir)
         CORS(self.app)
         
-        # Use threading mode instead of eventlet (more compatible)
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
+        # Initialize SocketIO with more explicit configuration
+        logger.info("Initializing SocketIO...")
+        self.socketio = SocketIO(
+            self.app, 
+            cors_allowed_origins="*",
+            async_mode='threading',
+            logger=False,
+            engineio_logger=False,
+            ping_timeout=60,
+            ping_interval=25
+        )
         
         self.camera_manager = camera_manager
         self.latest_result = None
@@ -96,6 +105,15 @@ class WebServer:
             color: #888;
             font-size: 14px;
         }
+        #debug {
+            background: rgba(255, 0, 0, 0.2);
+            padding: 10px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 12px;
+            max-width: 90vw;
+            overflow-x: auto;
+        }
     </style>
 </head>
 <body>
@@ -110,34 +128,66 @@ class WebServer:
         
         <div id="answer"></div>
         
+        <div id="debug">
+            <div>Debug Log:</div>
+            <div id="debug-log"></div>
+        </div>
+        
         <div class="info">
-            <p>📝 Press SPACE on Jetson to record voice query</p>
+            <p>📝 Press 't' on Jetson to test (test mode)</p>
             <p>🎥 Camera feed updates automatically</p>
         </div>
     </div>
     
     <script>
-        const socket = io();
+        // Debug logging
+        function log(msg) {
+            const debugLog = document.getElementById('debug-log');
+            const timestamp = new Date().toLocaleTimeString();
+            debugLog.innerHTML += `[${timestamp}] ${msg}<br>`;
+            console.log(msg);
+        }
+        
+        log('Initializing Socket.IO...');
+        
+        // Initialize Socket.IO with explicit configuration
+        const socket = io({
+            transports: ['websocket', 'polling'],
+            upgrade: true,
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionAttempts: 10
+        });
+        
+        log('Socket.IO initialized, attempting connection...');
         
         socket.on('connect', () => {
-            console.log('✅ Connected to server');
+            log('✅ Connected to server!');
+            console.log('Socket ID:', socket.id);
             document.getElementById('status-text').textContent = '✅ Connected';
             document.getElementById('status-text').style.color = '#0f0';
         });
         
-        socket.on('disconnect', () => {
-            console.log('❌ Disconnected from server');
-            document.getElementById('status-text').textContent = '❌ Disconnected';
+        socket.on('connect_error', (error) => {
+            log(`❌ Connection error: ${error.message}`);
+            document.getElementById('status-text').textContent = '❌ Connection Error';
+            document.getElementById('status-text').style.color = '#f00';
+        });
+        
+        socket.on('disconnect', (reason) => {
+            log(`❌ Disconnected: ${reason}`);
+            document.getElementById('status-text').textContent = `❌ Disconnected: ${reason}`;
             document.getElementById('status-text').style.color = '#f00';
         });
         
         socket.on('status', (data) => {
-            console.log('📡 Status:', data.message);
+            log(`📡 Status: ${data.message}`);
             document.getElementById('status-text').textContent = data.message;
         });
         
         socket.on('gemini_result', (result) => {
-            console.log('📡 Result:', result);
+            log(`📡 Result received!`);
+            console.log('Full result:', result);
             
             const answerDiv = document.getElementById('answer');
             answerDiv.textContent = result.answer;
@@ -147,10 +197,19 @@ class WebServer:
             document.getElementById('status-text').innerHTML = 
                 `Q: ${result.transcription}<br>Object: ${result.object}`;
             
-            // Hide after 5 seconds
+            // Hide after 10 seconds
             setTimeout(() => {
                 answerDiv.style.display = 'none';
-            }, 5000);
+            }, 10000);
+        });
+        
+        // Test: Check if video feed loads
+        const videoFeed = document.getElementById('video-feed');
+        videoFeed.addEventListener('load', () => {
+            log('✅ Video feed loaded');
+        });
+        videoFeed.addEventListener('error', () => {
+            log('❌ Video feed error');
         });
     </script>
 </body>
@@ -200,12 +259,18 @@ class WebServer:
         
         @self.socketio.on('connect')
         def handle_connect():
-            logger.info('🔌 Client connected')
+            logger.info('🔌 Client connected via WebSocket')
+            logger.info(f'   Client ID: {flask.request.sid if hasattr(flask, "request") else "unknown"}')
             emit('status', {'message': 'Connected to AURA AI'})
         
         @self.socketio.on('disconnect')
         def handle_disconnect():
-            logger.info('🔌 Client disconnected')
+            logger.info('🔌 Client disconnected from WebSocket')
+        
+        @self.socketio.on('ping')
+        def handle_ping(data):
+            logger.info(f'📡 Received ping from client')
+            emit('pong', {'data': data})
     
     def broadcast_result(self, result):
         """Broadcast result to all connected clients"""
@@ -217,6 +282,23 @@ class WebServer:
         self.socketio.emit('gemini_result', result)
         
         logger.info("✅ Broadcast complete")
+    
+    def test_broadcast(self):
+        """Test broadcasting to verify SocketIO works"""
+        logger.info("📡 Testing broadcast...")
+        test_result = {
+            "transcription": "Test query",
+            "answer": "This is a test answer from the server!",
+            "object": "test_object",
+            "position": {
+                "x": 0.5,
+                "y": 0.5,
+                "z": 0.5,
+                "confidence": 1.0
+            }
+        }
+        self.socketio.emit('gemini_result', test_result)
+        logger.info("✅ Test broadcast sent")
     
     def run(self):
         """Run the Flask server"""
