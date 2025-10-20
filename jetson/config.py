@@ -4,9 +4,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    # Camera settings - use integers, not strings
-    CAMERA_LEFT_INDEX = 0  # /dev/video0
-    CAMERA_RIGHT_INDEX = 1  # /dev/video1
+    # Camera settings - use device paths for Jetson compatibility
+    CAMERA_LEFT_INDEX = "/dev/video0"  # Use string path, not integer
+    CAMERA_RIGHT_INDEX = "/dev/video1"  # Use string path, not integer
     CAMERA_WIDTH = 640
     CAMERA_HEIGHT = 480
     CAMERA_FPS = 30
