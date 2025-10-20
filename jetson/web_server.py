@@ -13,7 +13,9 @@ class WebServer:
                         static_folder='../../web',
                         template_folder='../../web')
         CORS(self.app)
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='eventlet')
+        
+        # Use threading mode instead of eventlet (more compatible)
+        self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')
         
         self.camera_manager = camera_manager
         self.latest_result = None

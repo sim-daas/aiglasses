@@ -10,6 +10,12 @@ import threading
 import tempfile
 import os
 import cv2
+
+# Suppress ALSA warnings
+os.environ['ALSA_CARD'] = 'default'
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+
 from camera_manager import StereoCamera
 from audio_manager import AudioManager
 from gemini_client import GeminiClient
