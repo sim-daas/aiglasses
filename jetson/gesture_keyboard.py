@@ -36,6 +36,7 @@ class GestureKeyboard:
     PINCH_COOLDOWN = 0.3      # Prevent rapid repeated selections
     SUBMIT_HOLD_S = 1.5       # Hold time to submit
     BACKSPACE_HOLD_S = 0.5    # Hold time for continuous backspace
+    KEY_DEBOUNCE_S = 1.8      # Minimum time between same key presses
     
     def __init__(self):
         """Initialize gesture keyboard"""
@@ -58,6 +59,10 @@ class GestureKeyboard:
         self.submit_hold_start = None
         self.backspace_hold_start = None
         self.last_backspace_time = 0
+        
+        # Per-key debounce tracking
+        self.last_key_press_times = {}  # key -> timestamp
+        self.current_pinch_key = None   # Track which key is currently being pinched
         
         # Key positions (computed on first frame)
         self.key_rects = {}
@@ -171,6 +176,21 @@ class GestureKeyboard:
             cv2.putText(frame, label, (text_x, text_y), 
                        font, font_scale, text_color, 2)
     
+    def _can_press_key(self, key):
+        """Check if enough time has passed since last press of this key"""
+        now = time.time()
+        
+        # Special handling for BACK - allow faster repeat
+        if key == 'BACK':
+            return True
+        
+        # Check if this key was pressed recently
+        if key in self.last_key_press_times:
+            time_since_last = now - self.last_key_press_times[key]
+            return time_since_last >= self.KEY_DEBOUNCE_S
+        
+        return True
+    
     def _commit_key(self, key):
         """Add key to typed text"""
         now = time.time()
@@ -183,6 +203,8 @@ class GestureKeyboard:
         elif key != 'SUBMIT':
             self.typed_text += key.lower()
         
+        # Record the time this key was pressed
+        self.last_key_press_times[key] = now
         self.last_key_time = now
         logger.info(f"Key pressed: {key} → Text: '{self.typed_text}'")
     
@@ -260,7 +282,7 @@ class GestureKeyboard:
             )
             
             normalized_pinch = pinch_dist / (hand_scale + 1e-6)
-            is_pinching = normalized_pinch < 0.20  # Reduced from 0.5 to 0.35 for easier pinch detection
+            is_pinching = normalized_pinch < 0.20
             
             # Check which key is being pointed at
             hover_key = self._get_key_at_point(idx_tip_x, idx_tip_y)
@@ -277,8 +299,14 @@ class GestureKeyboard:
             # Handle pinch gesture
             now = time.time()
             
-            if is_pinching and (now - self.last_key_time > self.PINCH_COOLDOWN):
-                if hover_key:
+            if is_pinching and hover_key:
+                # Check if this is a new pinch on a different key
+                if self.current_pinch_key != hover_key:
+                    # New key - reset current pinch tracking
+                    self.current_pinch_key = hover_key
+                
+                # Check debounce for this specific key
+                if self._can_press_key(hover_key):
                     if hover_key == 'SUBMIT':
                         # Hold detection for submit
                         if self.submit_hold_start is None:
@@ -303,17 +331,28 @@ class GestureKeyboard:
                         status = "Backspace"
                     
                     else:
-                        # Regular key press
+                        # Regular key press - only if debounce allows
                         self._commit_key(hover_key)
                         status = f"Typed: {hover_key}"
+                else:
+                    # Key is still in debounce period
+                    time_remaining = self.KEY_DEBOUNCE_S - (now - self.last_key_press_times[hover_key])
+                    status = f"Wait {time_remaining:.1f}s to press '{hover_key}' again"
             else:
-                # Reset hold timers when not pinching
+                # Not pinching - reset hold timers and current pinch key
                 self.submit_hold_start = None
                 self.backspace_hold_start = None
+                if not is_pinching:
+                    self.current_pinch_key = None
             
             # Update status based on hover
             if hover_key and not is_pinching:
-                status = f"Hovering: {hover_key}"
+                # Show if key is available or in cooldown
+                if self._can_press_key(hover_key):
+                    status = f"Hovering: {hover_key}"
+                else:
+                    time_remaining = self.KEY_DEBOUNCE_S - (now - self.last_key_press_times[hover_key])
+                    status = f"Hovering: {hover_key} (cooldown: {time_remaining:.1f}s)"
             
             # Draw hand landmarks
             self.draw_utils.draw_landmarks(
@@ -321,6 +360,9 @@ class GestureKeyboard:
                 self.draw_utils.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
                 self.draw_utils.DrawingSpec(color=(255, 255, 0), thickness=2)
             )
+        else:
+            # No hand detected - reset current pinch key
+            self.current_pinch_key = None
         
         # Draw keyboard
         self._draw_keyboard(overlay, hover_key)
