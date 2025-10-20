@@ -19,12 +19,13 @@ logger = logging.getLogger(__name__)
 class GestureKeyboard:
     """Full QWERTY keyboard controlled by hand gestures"""
     
-    # Full QWERTY keyboard layout (4 rows)
+    # Full QWERTY keyboard layout (4 rows + zoom controls)
     KEYBOARD_LAYOUT = [
         ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
         ['Z', 'X', 'C', 'V', 'B', 'N', 'M'],
-        ['SPACE', 'BACK', 'SUBMIT']
+        ['SPACE', 'BACK', 'SUBMIT'],
+        ['ZOOM+', 'ZOOM-']  # New zoom controls row
     ]
     
     # Key dimensions (relative to frame size)
@@ -36,6 +37,7 @@ class GestureKeyboard:
     PINCH_COOLDOWN = 0.3      # Prevent rapid repeated selections
     BACKSPACE_HOLD_S = 0.5    # Hold time for continuous backspace
     KEY_DEBOUNCE_S = 1.8      # Minimum time between same key presses
+    ZOOM_STEP = 0.02          # Very slow zoom increment (2% per frame)
     
     def __init__(self):
         """Initialize gesture keyboard"""
@@ -57,6 +59,7 @@ class GestureKeyboard:
         self.last_key_time = 0
         self.backspace_hold_start = None
         self.last_backspace_time = 0
+        self.zoom_level = 1.0  # 1.0 = no zoom, >1.0 = zoomed in
         
         # Per-key debounce tracking
         self.last_key_press_times = {}  # key -> timestamp
@@ -75,6 +78,10 @@ class GestureKeyboard:
     def get_text(self):
         """Get current typed text"""
         return self.typed_text
+    
+    def get_zoom_level(self):
+        """Get current zoom level"""
+        return self.zoom_level
     
     @staticmethod
     def _norm(x):
@@ -97,16 +104,17 @@ class GestureKeyboard:
         spacing = int(frame_width * self.KEY_SPACING_RATIO)
         
         # Center the keyboard vertically in the middle 50% of frame
-        start_y = int(frame_height * 0.35)  # Start at 35% from top
+        start_y = int(frame_height * 0.30)  # Start at 30% from top (moved up for zoom row)
         
         # Build key rectangles for each row
         for row_idx, row in enumerate(self.KEYBOARD_LAYOUT):
             # Calculate row width for centering
             if row_idx < 3:  # Letter rows
                 row_width = len(row) * key_w + (len(row) - 1) * spacing
-            else:  # Special keys row
-                # SPACE is 3x wider
+            elif row_idx == 3:  # Special keys row (SPACE, BACK, SUBMIT)
                 row_width = key_w * 5 + spacing * 2
+            else:  # Zoom controls row
+                row_width = key_w * 2 + spacing
             
             start_x = (frame_width - row_width) // 2
             current_x = start_x
@@ -116,7 +124,7 @@ class GestureKeyboard:
                 if key == 'SPACE':
                     # Space key is wider
                     w = key_w * 3
-                elif key in ['BACK', 'SUBMIT']:
+                elif key in ['BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-']:
                     w = key_w
                 else:
                     w = key_w
@@ -144,16 +152,13 @@ class GestureKeyboard:
                 color = (100, 255, 100)
                 thickness = 3
                 text_color = (0, 255, 0)
-            elif key == 'SUBMIT':
-                # Same style as other keys
-                color = (80, 80, 80)
+            elif key in ['ZOOM+', 'ZOOM-']:
+                # Zoom keys in cyan
+                color = (100, 100, 80)
                 thickness = 2
-                text_color = (200, 200, 200)
-            elif key == 'BACK':
-                color = (80, 80, 80)
-                thickness = 2
-                text_color = (200, 200, 200)
+                text_color = (200, 200, 150)
             else:
+                # Regular keys
                 color = (80, 80, 80)
                 thickness = 2
                 text_color = (200, 200, 200)
@@ -162,11 +167,17 @@ class GestureKeyboard:
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, thickness)
             
             # Draw key label
-            label = key if key not in ['BACK', 'SUBMIT', 'SPACE'] else key[:3]
+            if key in ['ZOOM+', 'ZOOM-']:
+                label = key
+            else:
+                label = key if key not in ['BACK', 'SUBMIT', 'SPACE'] else key[:3]
             
             # Calculate text size for centering
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.6 if key in ['SPACE', 'BACK', 'SUBMIT'] else 0.8
+            if key in ['SPACE', 'BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-']:
+                font_scale = 0.5
+            else:
+                font_scale = 0.7
             text_size = cv2.getTextSize(label, font, font_scale, 2)[0]
             
             text_x = x + (w - text_size[0]) // 2
@@ -179,8 +190,8 @@ class GestureKeyboard:
         """Check if enough time has passed since last press of this key"""
         now = time.time()
         
-        # Special handling for BACK - allow faster repeat
-        if key == 'BACK':
+        # Special handling for BACK and ZOOM - allow continuous use
+        if key in ['BACK', 'ZOOM+', 'ZOOM-']:
             return True
         
         # Check if this key was pressed recently
@@ -191,7 +202,7 @@ class GestureKeyboard:
         return True
     
     def _commit_key(self, key):
-        """Add key to typed text"""
+        """Add key to typed text or handle special keys"""
         now = time.time()
         
         if key == 'SPACE':
@@ -199,13 +210,24 @@ class GestureKeyboard:
         elif key == 'BACK':
             if self.typed_text:
                 self.typed_text = self.typed_text[:-1]
+        elif key == 'ZOOM+':
+            # Slow zoom in (clamp to max 3x)
+            self.zoom_level = min(3.0, self.zoom_level + self.ZOOM_STEP)
+            logger.info(f"Zoom in: {self.zoom_level:.2f}x")
+        elif key == 'ZOOM-':
+            # Slow zoom out (clamp to min 1x)
+            self.zoom_level = max(1.0, self.zoom_level - self.ZOOM_STEP)
+            logger.info(f"Zoom out: {self.zoom_level:.2f}x")
         elif key != 'SUBMIT':
             self.typed_text += key.lower()
         
-        # Record the time this key was pressed
-        self.last_key_press_times[key] = now
+        # Record the time this key was pressed (except zoom keys)
+        if key not in ['ZOOM+', 'ZOOM-']:
+            self.last_key_press_times[key] = now
         self.last_key_time = now
-        logger.info(f"Key pressed: {key} → Text: '{self.typed_text}'")
+        
+        if key not in ['ZOOM+', 'ZOOM-']:
+            logger.info(f"Key pressed: {key} → Text: '{self.typed_text}'")
     
     def process_frame(self, frame):
         """
@@ -233,24 +255,24 @@ class GestureKeyboard:
         # Create overlay
         overlay = frame.copy()
         
-        # Draw text input area at top
-        text_area_h = int(h * 0.12)
-        text_area_y = int(h * 0.05)
+        # Draw text input area at top (smaller and sharper)
+        text_area_h = int(h * 0.08)  # Reduced from 0.12
+        text_area_y = int(h * 0.02)  # Closer to top
         cv2.rectangle(overlay, (20, text_area_y), (w - 20, text_area_y + text_area_h), 
                      (20, 20, 20), -1)
         cv2.rectangle(overlay, (20, text_area_y), (w - 20, text_area_y + text_area_h), 
                      (100, 100, 100), 2)
         
-        # Display typed text
-        display_text = self.typed_text if len(self.typed_text) < 50 else "..." + self.typed_text[-47:]
-        text_y = text_area_y + int(text_area_h * 0.7)
+        # Display typed text (smaller, crisper font)
+        display_text = self.typed_text if len(self.typed_text) < 60 else "..." + self.typed_text[-57:]
+        text_y = text_area_y + int(text_area_h * 0.65)
         cv2.putText(overlay, display_text, (30, text_y), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)  # Reduced size, added antialiasing
         
-        # Character count
-        char_count = f"{len(self.typed_text)} chars"
-        cv2.putText(overlay, char_count, (w - 150, text_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+        # Character count and zoom level
+        info_text = f"{len(self.typed_text)} chars | Zoom: {self.zoom_level:.2f}x"
+        cv2.putText(overlay, info_text, (w - 220, text_y),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1, cv2.LINE_AA)
         
         status = "Point at key and pinch to type"
         should_submit = False
@@ -324,6 +346,11 @@ class GestureKeyboard:
                                 self.last_backspace_time = now
                         status = "Backspace"
                     
+                    elif hover_key in ['ZOOM+', 'ZOOM-']:
+                        # Continuous zoom while held (no cooldown)
+                        self._commit_key(hover_key)
+                        status = f"Zoom: {self.zoom_level:.2f}x"
+                    
                     else:
                         # Regular key press - only if debounce allows
                         self._commit_key(hover_key)
@@ -347,11 +374,11 @@ class GestureKeyboard:
                     time_remaining = self.KEY_DEBOUNCE_S - (now - self.last_key_press_times[hover_key])
                     status = f"Hovering: {hover_key} (cooldown: {time_remaining:.1f}s)"
             
-            # Draw hand landmarks
+            # Draw hand landmarks (smaller, less intrusive)
             self.draw_utils.draw_landmarks(
                 overlay, hand, self.mp_hands.HAND_CONNECTIONS,
-                self.draw_utils.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
-                self.draw_utils.DrawingSpec(color=(255, 255, 0), thickness=2)
+                self.draw_utils.DrawingSpec(color=(0, 255, 0), thickness=1, circle_radius=1),
+                self.draw_utils.DrawingSpec(color=(255, 255, 0), thickness=1)
             )
         else:
             # No hand detected - reset current pinch key
@@ -360,12 +387,12 @@ class GestureKeyboard:
         # Draw keyboard
         self._draw_keyboard(overlay, hover_key)
         
-        # Draw status below keyboard
-        status_y = int(h * 0.75)
-        cv2.rectangle(overlay, (20, status_y - 30), (w - 20, status_y + 5), 
+        # Draw status below keyboard (smaller font)
+        status_y = int(h * 0.80)  # Moved down to make room for zoom row
+        cv2.rectangle(overlay, (20, status_y - 25), (w - 20, status_y + 5), 
                      (30, 30, 30), -1)
         cv2.putText(overlay, status, (30, status_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 100), 2)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 100), 1, cv2.LINE_AA)
         
         # Blend overlay
         frame = cv2.addWeighted(overlay, 0.9, frame, 0.1, 0)

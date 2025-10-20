@@ -306,6 +306,20 @@ class AURAGlasses:
                     if self.use_gesture_kb and self.gesture_keyboard:
                         display_frame, status, should_submit = self.gesture_keyboard.process_frame(display_frame)
                         
+                        # Apply digital zoom if zoom level > 1.0
+                        zoom_level = self.gesture_keyboard.get_zoom_level()
+                        if zoom_level > 1.0:
+                            h, w = display_frame.shape[:2]
+                            # Calculate crop region for zoom
+                            crop_w = int(w / zoom_level)
+                            crop_h = int(h / zoom_level)
+                            crop_x = (w - crop_w) // 2
+                            crop_y = (h - crop_h) // 2
+                            
+                            # Crop and resize to original size
+                            cropped = display_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                            display_frame = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+                        
                         if should_submit:
                             query = self.gesture_keyboard.get_text().strip()
                             if query:
