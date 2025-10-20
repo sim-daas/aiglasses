@@ -10,8 +10,10 @@ class StereoCamera:
         self.frame_left = None
         self.frame_right = None
         self.depth_map = None
+        self.processed_frame = None  # For web display with overlays
         self.running = False
         self.lock = threading.Lock()
+        self.frame_lock = threading.Lock()
         
         # Stereo matcher
         self.stereo = cv2.StereoBM_create(
@@ -126,6 +128,16 @@ class StereoCamera:
                 max(0, x-5):min(w, x+5)
             ]
             return float(np.mean(region))
+    
+    def set_processed_frame(self, frame):
+        """Store processed frame with overlays for web streaming"""
+        with self.frame_lock:
+            self.processed_frame = frame.copy() if frame is not None else None
+    
+    def get_processed_frame(self):
+        """Get processed frame for web streaming"""
+        with self.frame_lock:
+            return self.processed_frame.copy() if self.processed_frame is not None else None
     
     def stop(self):
         """Stop camera capture"""

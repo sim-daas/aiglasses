@@ -394,12 +394,11 @@ class AURAGlasses:
                             cropped = display_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                             display_frame = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
                         
-                        # Process keyboard overlay
+                        # Process keyboard overlay - THIS DRAWS THE KEYBOARD ON display_frame
                         display_frame, status, should_submit = self.gesture_keyboard.process_frame(display_frame)
                         
                         # Check for special button presses
                         if 'TRANSLATE' in status:
-                            # TRANSLATE button pressed
                             self.process_translation()
                         elif should_submit:
                             query = self.gesture_keyboard.get_text().strip()

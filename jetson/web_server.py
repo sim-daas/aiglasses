@@ -517,21 +517,26 @@ class WebServer:
         return location_map.get(location.lower(), (int(frame_width * 0.5), int(frame_height * 0.5)))
     
     def _generate_frames(self):
-        """Generate JPEG frames WITHOUT text overlay"""
+        """Generate JPEG frames with gesture keyboard overlay"""
         while True:
-            frame_left, frame_right, depth_map = self.camera_manager.get_frames()
+            # Try to get processed frame first (has keyboard overlay)
+            frame = self.camera_manager.get_processed_frame()
             
-            if frame_left is not None:
-                # NO text overlay - send clean frame
-                # The HTML/CSS overlay will handle all text rendering
-                
+            # Fallback to raw left frame if no processed frame
+            if frame is None:
+                frame_left, _, _ = self.camera_manager.get_frames()
+                frame = frame_left
+            
+            if frame is not None:
                 # Encode frame as JPEG
-                ret, buffer = cv2.imencode('.jpg', frame_left, 
+                ret, buffer = cv2.imencode('.jpg', frame, 
                                           [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = buffer.tobytes();
+                frame_bytes = buffer.tobytes()
                 
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n');
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            time.sleep(0.033)  # ~30 FPS
     
     def _setup_socketio(self):
         """Setup WebSocket event handlers"""
