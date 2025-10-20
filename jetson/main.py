@@ -74,9 +74,11 @@ class AURAGlasses:
         self.translator = None
         self.translation_results = []
         self.last_translate_time = 0
-        self.submit_pending = False  # Track pending submit
-        self.submit_time = 0  # When submit was pressed
-        self.submit_query = ""  # Query to submit
+        self.submit_pending = False
+        self.submit_time = 0
+        self.submit_query = ""
+        self.translate_pending = False  # Track pending translate
+        self.translate_time = 0  # When translate was pressed
         
         # Initialize tape measure if requested
         if use_tape_measure:
@@ -290,8 +292,11 @@ class AURAGlasses:
                         current_time = time.time()
                         if 'Typed: TRANSLATE' in status and (current_time - self.last_translate_time) > 2.0:
                             if self.translator:
-                                self.process_translation()
+                                # Start translate countdown
+                                self.translate_pending = True
+                                self.translate_time = current_time
                                 self.last_translate_time = current_time
+                                logger.info("⏳ TRANSLATE pressed! Capturing in 5 seconds for OCR...")
                             else:
                                 if (current_time - self.last_translate_time) > 10.0:
                                     logger.warning("⚠️  Translator not initialized. Install: pip install easyocr langdetect deep-translator")
@@ -332,7 +337,7 @@ class AURAGlasses:
                                         (text_x + text_size[0] + padding, text_y + padding),
                                         (0, 0, 0), -1)
                             
-                            # Countdown text
+                            # Countdown text (green for submit)
                             cv2.putText(display_frame, countdown_text, (text_x, text_y),
                                        font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
                         else:
@@ -345,8 +350,47 @@ class AURAGlasses:
                                            args=(self.submit_query, frame_left, frame_right, depth_map),
                                            daemon=True).start()
                     
-                    # Draw translation overlay if available
-                    if self.translation_results and self.translator:
+                    # Check if 5 seconds have passed since translate
+                    if self.translate_pending:
+                        current_time = time.time()
+                        elapsed = current_time - self.translate_time
+                        remaining = 5.0 - elapsed
+                        
+                        # Draw countdown on display_frame
+                        if remaining > 0:
+                            countdown_text = f"Translating in {remaining:.1f}s..."
+                            h, w = display_frame.shape[:2]
+                            
+                            # Large centered countdown
+                            font = cv2.FONT_HERSHEY_SIMPLEX
+                            font_scale = 1.5
+                            thickness = 3
+                            text_size = cv2.getTextSize(countdown_text, font, font_scale, thickness)[0]
+                            text_x = (w - text_size[0]) // 2
+                            text_y = (h + text_size[1]) // 2
+                            
+                            # Background rectangle
+                            padding = 20
+                            cv2.rectangle(display_frame,
+                                        (text_x - padding, text_y - text_size[1] - padding),
+                                        (text_x + text_size[0] + padding, text_y + padding),
+                                        (0, 0, 0), -1)
+                            
+                            # Countdown text (orange for translate)
+                            cv2.putText(display_frame, countdown_text, (text_x, text_y),
+                                       font, font_scale, (0, 165, 255), thickness, cv2.LINE_AA)
+                        else:
+                            # Time's up - capture and translate
+                            logger.info("📸 5 seconds elapsed, capturing frame for translation...")
+                            self.translate_pending = False
+                            
+                            # Process translation with current frame
+                            threading.Thread(target=self._process_delayed_translation, 
+                                           args=(frame_left, frame_right, depth_map),
+                                           daemon=True).start()
+                    
+                    # Draw translation overlay if available (not from countdown, from actual results)
+                    if self.translation_results and self.translator and not self.translate_pending:
                         display_frame = self.translator.draw_overlay(display_frame, self.translation_results)
                     
                     # Draw tape measure overlay
@@ -405,6 +449,72 @@ class AURAGlasses:
             logger.info("\n👋 Interrupted, shutting down...")
         finally:
             self.cleanup()
+    
+    def _process_delayed_translation(self, frame_left, frame_right, depth_map):
+        """Process OCR translation in background thread (called after 5-second delay)"""
+        logger.info("📝 Processing delayed OCR translation...")
+        
+        try:
+            if frame_left is None:
+                logger.error("❌ No camera frame available")
+                return
+            
+            # Save frame to temporary file
+            image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
+            cv2.imwrite(image_file.name, frame_right if frame_right is not None else frame_left)
+            
+            logger.info("📸 Frame captured, sending to Gemini for translation...")
+            
+            # Create translation prompt
+            translation_query = "Please detect and translate all visible text in this image to English. For each text region, provide: 1) The original text, 2) The detected language, 3) The English translation, 4) The approximate location (top-left, center, etc). Format as a clear list."
+            
+            # Process with Gemini
+            result = self.gemini.process_multimodal_query(
+                image_path=image_file.name,
+                text_query=translation_query
+            )
+            
+            logger.info("📊 TRANSLATION RESULTS:")
+            logger.info(f"   Q: {result['transcription']}")
+            logger.info(f"   A: {result['answer']}")
+            
+            # Parse translation result and create overlay data
+            translation_data = {
+                'type': 'translation',
+                'answer': result['answer'],
+                'object': result.get('object', 'text'),
+                'location': result.get('location', 'center'),
+                'position': result.get('position', {'x': 0.5, 'y': 0.5, 'z': 0.5})
+            }
+            
+            # Broadcast to web clients
+            self.server.broadcast_result(translation_data)
+            
+            # Store for local overlay (simplified format)
+            self.translation_results = [{
+                'text': result.get('answer', 'No text detected'),
+                'translated': result.get('answer', ''),
+                'bbox': [[100, 100], [500, 100], [500, 300], [100, 300]],
+                'center': [300, 200],
+                'confidence': 0.9
+            }]
+            
+            # Cleanup
+            os.unlink(image_file.name)
+            logger.info("✅ Translation processing complete!")
+            
+            # Clear translation results after 10 seconds
+            threading.Timer(10.0, self._clear_translation_results).start()
+            
+        except Exception as e:
+            logger.error(f"❌ Translation processing error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _clear_translation_results(self):
+        """Clear translation overlay after timeout"""
+        self.translation_results = []
+        logger.info("🗑️ Translation results cleared")
     
     def _process_delayed_query(self, query_text, frame_left, frame_right, depth_map):
         """Process query in background thread (called after 5-second delay)"""
