@@ -73,6 +73,7 @@ class AURAGlasses:
         self.tape_measure = None
         self.translator = None
         self.translation_results = []
+        self.last_translate_time = 0  # Track last translation to avoid spam
         
         # Initialize tape measure if requested
         if use_tape_measure:
@@ -381,7 +382,6 @@ class AURAGlasses:
                     
                     # Process gesture keyboard if enabled
                     if self.use_gesture_kb and self.gesture_keyboard:
-                        # Get zoom level before processing
                         zoom_level = self.gesture_keyboard.get_zoom_level()
                         
                         # Apply digital zoom
@@ -394,12 +394,21 @@ class AURAGlasses:
                             cropped = display_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                             display_frame = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
                         
-                        # Process keyboard overlay - THIS DRAWS THE KEYBOARD ON display_frame
+                        # Process keyboard overlay
                         display_frame, status, should_submit = self.gesture_keyboard.process_frame(display_frame)
                         
-                        # Check for special button presses
-                        if 'TRANSLATE' in status:
-                            self.process_translation()
+                        # Check for TRANSLATE button (with cooldown to avoid spam)
+                        current_time = time.time()
+                        if 'Typed: TRANSLATE' in status and (current_time - self.last_translate_time) > 2.0:
+                            # Only trigger if translator is available
+                            if self.translator:
+                                self.process_translation()
+                                self.last_translate_time = current_time
+                            else:
+                                # Log once, not repeatedly
+                                if (current_time - self.last_translate_time) > 10.0:
+                                    logger.warning("⚠️  Translator not initialized. Install: pip install easyocr langdetect deep-translator")
+                                self.last_translate_time = current_time
                         elif should_submit:
                             query = self.gesture_keyboard.get_text().strip()
                             if query:

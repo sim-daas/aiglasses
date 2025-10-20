@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 class GestureKeyboard:
     """Full QWERTY keyboard controlled by hand gestures"""
     
-    # Full QWERTY keyboard layout (5 rows - added TRANSLATE)
+    # Full QWERTY keyboard layout (5 rows with better spacing)
     KEYBOARD_LAYOUT = [
         ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
         ['Z', 'X', 'C', 'V', 'B', 'N', 'M'],
         ['SPACE', 'BACK', 'SUBMIT'],
-        ['ZOOM+', 'ZOOM-', 'TRANSLATE']  # Added TRANSLATE button
+        ['ZOOM+', 'ZOOM-', 'SPACER', 'TRANSLATE']  # Added spacer for separation
     ]
     
     # Key dimensions (relative to frame size)
@@ -103,8 +103,8 @@ class GestureKeyboard:
         key_h = int(frame_height * self.KEY_HEIGHT_RATIO)
         spacing = int(frame_width * self.KEY_SPACING_RATIO)
         
-        # Center the keyboard vertically in the middle 50% of frame
-        start_y = int(frame_height * 0.30)  # Start at 30% from top (moved up for zoom row)
+        # Center the keyboard vertically
+        start_y = int(frame_height * 0.30)
         
         # Build key rectangles for each row
         for row_idx, row in enumerate(self.KEYBOARD_LAYOUT):
@@ -113,16 +113,21 @@ class GestureKeyboard:
                 row_width = len(row) * key_w + (len(row) - 1) * spacing
             elif row_idx == 3:  # Special keys row (SPACE, BACK, SUBMIT)
                 row_width = key_w * 5 + spacing * 2
-            else:  # Zoom controls row - add extra spacing
-                row_width = key_w * 2 + key_w + spacing * 2  # Two buttons + one button width spacing
+            else:  # Bottom row with zoom and translate
+                # 2 zoom buttons + 2 button widths gap + 1 translate button
+                row_width = key_w * 5 + spacing * 3
             
             start_x = (frame_width - row_width) // 2
             current_x = start_x
             current_y = start_y + row_idx * (key_h + spacing)
             
-            for key_idx, key in enumerate(row):
+            for key in row:
+                if key == 'SPACER':
+                    # Add spacing but don't create a button
+                    current_x += key_w * 2  # 2 button widths of space
+                    continue
+                
                 if key == 'SPACE':
-                    # Space key is wider
                     w = key_w * 3
                 elif key in ['BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-', 'TRANSLATE']:
                     w = key_w
@@ -132,10 +137,6 @@ class GestureKeyboard:
                 # Store key rectangle: (x, y, width, height)
                 self.key_rects[key] = (current_x, current_y, w, key_h)
                 current_x += w + spacing
-                
-                # Add extra spacing after ZOOM+ button (one button width)
-                if row_idx == 4 and key == 'ZOOM+':
-                    current_x += key_w
         
         self.keyboard_initialized = True
         logger.info(f"Keyboard layout initialized: {len(self.key_rects)} keys")
@@ -156,6 +157,11 @@ class GestureKeyboard:
                 color = (100, 255, 100)
                 thickness = 3
                 text_color = (0, 255, 0)
+            elif key == 'TRANSLATE':
+                # Orange/yellow color for translate button
+                color = (100, 150, 255)
+                thickness = 2
+                text_color = (200, 220, 255)
             elif key in ['ZOOM+', 'ZOOM-']:
                 # Zoom keys in cyan
                 color = (100, 100, 80)
@@ -171,17 +177,20 @@ class GestureKeyboard:
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, thickness)
             
             # Draw key label
-            if key in ['ZOOM+', 'ZOOM-']:
+            if key in ['ZOOM+', 'ZOOM-', 'TRANSLATE']:
                 label = key
             else:
                 label = key if key not in ['BACK', 'SUBMIT', 'SPACE'] else key[:3]
             
             # Calculate text size for centering
             font = cv2.FONT_HERSHEY_SIMPLEX
-            if key in ['SPACE', 'BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-', 'TRANSLATE']:
+            if key in ['SPACE', 'BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-']:
                 font_scale = 0.5
+            elif key == 'TRANSLATE':
+                font_scale = 0.4  # Smaller to fit
             else:
                 font_scale = 0.7
+            
             text_size = cv2.getTextSize(label, font, font_scale, 2)[0]
             
             text_x = x + (w - text_size[0]) // 2

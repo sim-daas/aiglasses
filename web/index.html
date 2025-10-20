@@ -25,6 +25,7 @@
             height: 100vh;
         }
 
+        /* Main clean feed for AR overlays */
         #feed {
             position: absolute;
             inset: 0;
@@ -32,6 +33,43 @@
             height: 100%;
             object-fit: contain;
             filter: brightness(0.95);
+        }
+
+        /* Picture-in-Picture gesture keyboard feed */
+        #keyboard-feed {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 320px;
+            height: 240px;
+            border: 2px solid #0f0;
+            border-radius: 8px;
+            z-index: 50;
+            object-fit: cover;
+            box-shadow: 0 4px 20px rgba(0, 255, 0, 0.3);
+        }
+
+        #keyboard-feed.hidden {
+            display: none;
+        }
+
+        /* Toggle button for keyboard feed */
+        #toggle-keyboard {
+            position: absolute;
+            bottom: 270px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 255, 0, 0.5);
+            color: #0f0;
+            cursor: pointer;
+            font-size: 12px;
+            z-index: 51;
+        }
+
+        #toggle-keyboard:hover {
+            background: rgba(0, 255, 0, 0.1);
         }
 
         /* Three.js canvas for depth occlusion */
@@ -228,16 +266,17 @@
 
 <body>
     <div id="wrap">
+        <!-- Main clean feed for AR visualization -->
         <img id="feed" src="/video_feed" alt="Camera Feed" />
+
+        <!-- Picture-in-Picture gesture keyboard feed -->
+        <img id="keyboard-feed" src="/keyboard_feed" alt="Gesture Keyboard" />
+
+        <button id="toggle-keyboard">Toggle Keyboard</button>
 
         <!-- Three.js canvas will be inserted here -->
 
         <div id="cards"></div>
-
-        <div id="hud">
-            <input id="q" size="32" placeholder="Type a question, tap object, hit Ask…" />
-            <button id="ask">Ask</button>
-        </div>
 
         <div id="status" class="status-disconnected">Connecting...</div>
 
@@ -313,7 +352,12 @@
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
     <script>
-        console.log('🚀 AURA AI Glasses - 3D Depth-Aware Overlay');
+        console.log('🚀 AURA AI Glasses - 3D Depth-Aware Overlay with Separate Keyboard Feed');
+
+        // Toggle keyboard feed visibility
+        document.getElementById('toggle-keyboard').addEventListener('click', () => {
+            document.getElementById('keyboard-feed').classList.toggle('hidden');
+        });
 
         const wrap = document.getElementById('wrap');
         const feed = document.getElementById('feed');

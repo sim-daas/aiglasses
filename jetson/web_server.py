@@ -483,8 +483,17 @@ class WebServer:
         
         @self.app.route('/video_feed')
         def video_feed():
+            """Clean video feed without keyboard overlay"""
             return Response(
-                self._generate_frames(),
+                self._generate_clean_frames(),
+                mimetype='multipart/x-mixed-replace; boundary=frame'
+            )
+        
+        @self.app.route('/keyboard_feed')
+        def keyboard_feed():
+            """Video feed WITH gesture keyboard overlay"""
+            return Response(
+                self._generate_keyboard_frames(),
                 mimetype='multipart/x-mixed-replace; boundary=frame'
             )
         
@@ -518,10 +527,27 @@ class WebServer:
         }
         return location_map.get(location.lower(), (int(frame_width * 0.5), int(frame_height * 0.5)))
     
-    def _generate_frames(self):
-        """Generate JPEG frames with gesture keyboard overlay"""
+    def _generate_clean_frames(self):
+        """Generate clean JPEG frames WITHOUT overlays for AR visualization"""
         while True:
-            # Try to get processed frame first (has keyboard overlay)
+            # Get raw left frame only
+            frame_left, _, _ = self.camera_manager.get_frames()
+            
+            if frame_left is not None:
+                # Encode frame as JPEG
+                ret, buffer = cv2.imencode('.jpg', frame_left, 
+                                          [cv2.IMWRITE_JPEG_QUALITY, 85])
+                frame_bytes = buffer.tobytes()
+                
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            time.sleep(0.033)  # ~30 FPS
+    
+    def _generate_keyboard_frames(self):
+        """Generate JPEG frames WITH gesture keyboard overlay"""
+        while True:
+            # Get processed frame with keyboard overlay
             frame = self.camera_manager.get_processed_frame()
             
             # Fallback to raw left frame if no processed frame
@@ -533,7 +559,7 @@ class WebServer:
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame, 
                                           [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = buffer.tobytes();
+                frame_bytes = buffer.tobytes()
                 
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
