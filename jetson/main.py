@@ -274,7 +274,8 @@ class AURAGlasses:
             logger.info("📏 AR TAPE MEASURE ENABLED")
             logger.info("Click or use keys to measure distances\n")
         
-        # Mouse callback for tape measure
+        # Define mouse callback for tape measure (will be registered after window creation)
+        mouse_callback_registered = False
         if self.use_tape_measure:
             def mouse_callback(event, x, y, flags, param):
                 if event == cv2.EVENT_LBUTTONDOWN:
@@ -287,8 +288,6 @@ class AURAGlasses:
                         self.tape_measure.point2 = None
                 elif event == cv2.EVENT_RBUTTONDOWN:
                     self.tape_measure.set_arrow(x, y)
-            
-            cv2.setMouseCallback('AURA AI Glasses', mouse_callback)
         
         try:
             frame_count = 0
@@ -343,6 +342,12 @@ class AURAGlasses:
                     
                     # Show single camera view
                     cv2.imshow('AURA AI Glasses', display_frame)
+                    
+                    # Register mouse callback AFTER window is created (only once)
+                    if self.use_tape_measure and not mouse_callback_registered:
+                        cv2.setMouseCallback('AURA AI Glasses', mouse_callback)
+                        mouse_callback_registered = True
+                        logger.info("✅ Mouse callback registered for tape measure")
                 
                 key = cv2.waitKey(1) & 0xFF
                 
