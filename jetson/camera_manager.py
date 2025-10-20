@@ -128,11 +128,20 @@ class StereoCamera:
             return float(np.mean(region))
     
     def stop(self):
-        """Stop camera"""
+        """Stop camera capture"""
+        logger.info("Stopping camera capture...")
         self.running = False
         
-        if self.cap:
-            self.cap.release()
-            print("✅ Camera released")
+        if self.capture_thread and self.capture_thread.is_alive():
+            self.capture_thread.join(timeout=2.0)
         
-        cv2.destroyAllWindows()
+        if self.cap_left:
+            self.cap_left.release()
+            logger.info("✅ Left camera released")
+        
+        if self.cap_right:
+            self.cap_right.release()
+            logger.info("✅ Right camera released")
+        
+        # Don't call destroyAllWindows - handled by main app
+        logger.info("✅ Camera resources released")

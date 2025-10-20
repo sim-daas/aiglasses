@@ -48,7 +48,7 @@ except ImportError:
     logger.warning("⚠️  Live translator not available. Install: pip install easyocr langdetect deep-translator")
 
 class AURAGlasses:
-    def __init__(self, test_mode=False, use_gesture_kb=False, use_tape_measure=False):
+    def __init__(self, test_mode=False, use_gesture_kb=False, use_tape_measure=False, headless=True):
         logger.info("🚀 Initializing AURA AI Glasses...")
         
         # Initialize components
@@ -67,6 +67,7 @@ class AURAGlasses:
         self.test_mode = test_mode
         self.use_gesture_kb = use_gesture_kb
         self.use_tape_measure = use_tape_measure
+        self.headless = headless  # Run without OpenCV windows
         self.current_result = None
         self.gesture_keyboard = None
         self.tape_measure = None
@@ -117,6 +118,11 @@ class AURAGlasses:
         elif use_gesture_kb and not TRANSLATOR_AVAILABLE:
             logger.warning("⚠️  Translator libraries not available")
             logger.warning("    Install with: pip install easyocr langdetect deep-translator")
+        
+        if not headless:
+            logger.info("⚠️  Display mode enabled (requires X11/GTK)")
+        else:
+            logger.info("✅ Headless mode - using web interface only")
         
         logger.info("✅ AURA AI Glasses initialized!")
         
@@ -341,9 +347,9 @@ class AURAGlasses:
             logger.info("📏 AR TAPE MEASURE ENABLED")
             logger.info("Click or use keys to measure distances\n")
         
-        # Define mouse callback for tape measure (will be registered after window creation)
+        # Mouse callback only works with OpenCV windows (not in headless mode)
         mouse_callback_registered = False
-        if self.use_tape_measure:
+        if self.use_tape_measure and not self.headless:
             def mouse_callback(event, x, y, flags, param):
                 if event == cv2.EVENT_LBUTTONDOWN:
                     if self.tape_measure.point1 is None:
@@ -412,16 +418,32 @@ class AURAGlasses:
                     cv2.putText(display_frame, f"Frame: {frame_count}", (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     
-                    # Show single camera view
-                    cv2.imshow('AURA AI Glasses', display_frame)
-                    
-                    # Register mouse callback AFTER window is created (only once)
-                    if self.use_tape_measure and not mouse_callback_registered:
-                        cv2.setMouseCallback('AURA AI Glasses', mouse_callback)
-                        mouse_callback_registered = True
-                        logger.info("✅ Mouse callback registered for tape measure")
+                    # Show single camera view (ONLY if not headless)
+                    if not self.headless:
+                        try:
+                            cv2.imshow('AURA AI Glasses', display_frame)
+                            
+                            # Register mouse callback AFTER window is created (only once)
+                            if self.use_tape_measure and not mouse_callback_registered:
+                                cv2.setMouseCallback('AURA AI Glasses', mouse_callback)
+                                mouse_callback_registered = True
+                                logger.info("✅ Mouse callback registered for tape measure")
+                        except cv2.error as e:
+                            logger.warning(f"⚠️  OpenCV display error (switching to headless): {e}")
+                            self.headless = True  # Switch to headless if display fails
                 
-                key = cv2.waitKey(1) & 0xFF
+                # Handle keyboard input (waitKey only works with windows, use alternative for headless)
+                if not self.headless:
+                    key = cv2.waitKey(1) & 0xFF
+                else:
+                    # In headless mode, use a simple input check with timeout
+                    # This allows 't' and 'q' commands via stdin
+                    import select
+                    if select.select([sys.stdin], [], [], 0.01)[0]:
+                        key_input = sys.stdin.read(1).lower()
+                        key = ord(key_input) if key_input else 255
+                    else:
+                        key = 255
                 
                 if key == ord('t') and self.test_mode:
                     self.process_test_query()
@@ -430,16 +452,20 @@ class AURAGlasses:
                     break
                 elif key == ord('1') and self.use_tape_measure:
                     # Set point 1 at center
-                    self.tape_measure.set_point1(self.tape_measure.cx, self.tape_measure.cy)
+                    if self.tape_measure:
+                        self.tape_measure.set_point1(self.tape_measure.cx, self.tape_measure.cy)
                 elif key == ord('2') and self.use_tape_measure:
                     # Set point 2 at center
-                    self.tape_measure.set_point2(self.tape_measure.cx, self.tape_measure.cy)
+                    if self.tape_measure:
+                        self.tape_measure.set_point2(self.tape_measure.cx, self.tape_measure.cy)
                 elif key == ord('a') and self.use_tape_measure:
                     # Place arrow at center
-                    self.tape_measure.set_arrow(self.tape_measure.cx, self.tape_measure.cy)
+                    if self.tape_measure:
+                        self.tape_measure.set_arrow(self.tape_measure.cx, self.tape_measure.cy)
                 elif key == ord('r') and self.use_tape_measure:
                     # Reset measurements
-                    self.tape_measure.clear_measurements()
+                    if self.tape_measure:
+                        self.tape_measure.clear_measurements()
                 
                 time.sleep(0.01)
         
@@ -454,7 +480,14 @@ class AURAGlasses:
         self.camera.stop()
         if self.gesture_keyboard:
             self.gesture_keyboard.cleanup()
-        cv2.destroyAllWindows()
+        
+        # Only destroy windows if not headless
+        if not self.headless:
+            try:
+                cv2.destroyAllWindows()
+            except cv2.error:
+                pass  # Ignore if OpenCV GUI not available
+        
         logger.info("✅ Cleanup complete")
 
 def main():
@@ -468,6 +501,8 @@ def main():
                        help='Enable gesture keyboard mode')
     parser.add_argument('--measure', action='store_true',
                        help='Enable AR tape measure mode')
+    parser.add_argument('--display', action='store_true',
+                       help='Enable OpenCV display (requires X11/GTK, default: headless)')
     
     args = parser.parse_args()
     
@@ -475,7 +510,8 @@ def main():
         app = AURAGlasses(
             test_mode=args.test,
             use_gesture_kb=args.gesture,
-            use_tape_measure=args.measure
+            use_tape_measure=args.measure,
+            headless=not args.display  # Default to headless mode
         )
         app.run()
     except Exception as e:
