@@ -239,39 +239,6 @@ class AURAGlasses:
         }
         return location_map.get(location.lower(), (int(frame_width * 0.5), int(frame_height * 0.5)))
     
-    def _draw_3d_text_overlay(self, frame, result):
-        """Draw 3D text with proper depth-based perspective scaling"""
-        if not result:
-            return frame
-        
-        h, w = frame.shape[:2]
-        location = result.get('location', 'center')
-        pixel_x, pixel_y = self._map_location_to_position(location, w, h)
-        depth_normalized = result.get('position', {}).get('z', 0.5)
-        z_depth = 20.0 - (depth_normalized * 15.0)
-        
-        answer = result['answer']
-        object_name = result['object']
-        
-        # Render main answer
-        frame = self.text_renderer.render_3d_text(
-            frame, answer, (pixel_x, pixel_y), z_depth=z_depth
-        )
-        
-        # Render label
-        label_offset = int(h * 0.08)
-        label_y = min(pixel_y + label_offset, h - 50)
-        frame = self.text_renderer.render_3d_text(
-            frame, f"[{object_name}]", (pixel_x, label_y), z_depth=z_depth * 0.5
-        )
-        
-        # Draw indicators
-        cv2.line(frame, (pixel_x - 10, pixel_y), (pixel_x + 10, pixel_y), (0, 255, 0), 2)
-        cv2.line(frame, (pixel_x, pixel_y - 10), (pixel_x, pixel_y + 10), (0, 255, 0), 2)
-        cv2.circle(frame, (pixel_x, pixel_y), 8, (0, 255, 0), 2)
-        
-        return frame
-    
     def run(self):
         """Run the main application"""
         # Start web server
@@ -328,7 +295,7 @@ class AURAGlasses:
                             if query:
                                 self.process_gesture_query(query)
                     
-                    # NO 3D text overlay in test mode - using web CSS 3D instead
+                    # NO OpenCV text overlay - using web-based CSS 3D overlay instead
                     
                     # Add frame counter
                     cv2.putText(display_frame, f"Frame: {frame_count}", (10, 30),
