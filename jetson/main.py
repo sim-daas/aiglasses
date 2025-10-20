@@ -103,8 +103,20 @@ class AURAGlasses:
         
         # Initialize translator if gesture keyboard is enabled
         if use_gesture_kb and TRANSLATOR_AVAILABLE:
-            logger.info("Initializing live translator...")
-            self.translator = LiveTranslator(target_lang='en')
+            try:
+                logger.info("Initializing live translator...")
+                # Use basic language set to avoid compatibility issues
+                self.translator = LiveTranslator(
+                    target_lang='en',
+                    ocr_langs=['en', 'es', 'fr', 'de']  # Start with compatible languages
+                )
+            except Exception as e:
+                logger.warning(f"⚠️  Could not initialize translator: {e}")
+                logger.warning("    Translation feature will be disabled")
+                self.translator = None
+        elif use_gesture_kb and not TRANSLATOR_AVAILABLE:
+            logger.warning("⚠️  Translator libraries not available")
+            logger.warning("    Install with: pip install easyocr langdetect deep-translator")
         
         logger.info("✅ AURA AI Glasses initialized!")
         

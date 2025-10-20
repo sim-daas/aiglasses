@@ -27,13 +27,24 @@ logger = logging.getLogger(__name__)
 class LiveTranslator:
     """Real-time OCR and translation"""
     
-    def __init__(self, target_lang='en', ocr_langs=None, memory_file='aura_memory.json'):
+    # Predefined language sets for EasyOCR compatibility
+    LANGUAGE_PRESETS = {
+        'western': ['en', 'es', 'fr', 'de', 'it', 'pt'],
+        'eastern': ['ch_sim', 'en'],  # Chinese requires English
+        'japanese': ['ja', 'en'],     # Japanese requires English
+        'korean': ['ko', 'en'],       # Korean requires English
+        'arabic': ['ar', 'en'],       # Arabic requires English
+        'cyrillic': ['en', 'ru'],     # Russian with English
+        'mixed': ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru']  # Safe multi-language
+    }
+    
+    def __init__(self, target_lang='en', language_preset='western', memory_file='aura_memory.json'):
         """
         Initialize translator
         
         Args:
             target_lang: Target language code (default: 'en')
-            ocr_langs: List of language codes for OCR (default: common languages)
+            language_preset: Preset name from LANGUAGE_PRESETS (default: 'western')
             memory_file: File to persist user preferences
         """
         if not EASYOCR_AVAILABLE:
@@ -42,9 +53,8 @@ class LiveTranslator:
         if not TRANSLATE_AVAILABLE:
             raise ImportError("Translation libs not available. Install: pip install langdetect deep-translator")
         
-        # Default OCR languages (lighter set for faster processing)
-        if ocr_langs is None:
-            ocr_langs = ['en', 'es', 'fr', 'de', 'it', 'pt', 'ar', 'ru', 'tr', 'ja', 'ko', 'ch_sim']
+        # Get language set from preset
+        ocr_langs = self.LANGUAGE_PRESETS.get(language_preset, self.LANGUAGE_PRESETS['western'])
         
         self.target_lang = target_lang
         self.ocr_min_conf = 0.55
@@ -54,9 +64,16 @@ class LiveTranslator:
         # Load memory/preferences
         self.memory = self._load_memory()
         
-        # Initialize EasyOCR reader
-        logger.info(f"Initializing EasyOCR with languages: {ocr_langs}")
-        self.reader = easyocr.Reader(ocr_langs, gpu=True)
+        # Initialize EasyOCR reader with compatible language set
+        logger.info(f"Initializing EasyOCR with preset '{language_preset}': {ocr_langs}")
+        
+        try:
+            self.reader = easyocr.Reader(ocr_langs, gpu=True, verbose=False)
+            logger.info(f"✅ EasyOCR initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ EasyOCR initialization failed with preset '{language_preset}': {e}")
+            logger.info("Falling back to English-only OCR...")
+            self.reader = easyocr.Reader(['en'], gpu=True, verbose=False)
         
         logger.info(f"✅ Live translator initialized (target: {target_lang})")
     
