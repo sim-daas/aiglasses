@@ -298,12 +298,13 @@ class AURAGlasses:
                 
                 if frame_left is not None:
                     frame_count += 1
-                    display_left = frame_left.copy()
-                    display_right = frame_right.copy()
+                    
+                    # Use only left camera for display
+                    display_frame = frame_left.copy()
                     
                     # Process gesture keyboard if enabled
                     if self.use_gesture_kb and self.gesture_keyboard:
-                        display_left, status, should_submit = self.gesture_keyboard.process_frame(display_left)
+                        display_frame, status, should_submit = self.gesture_keyboard.process_frame(display_frame)
                         
                         if should_submit:
                             query = self.gesture_keyboard.get_text().strip()
@@ -312,14 +313,14 @@ class AURAGlasses:
                     
                     # Add 3D text overlay if we have results
                     if self.current_result:
-                        display_left = self._draw_3d_text_overlay(display_left, self.current_result)
-                        display_right = self._draw_3d_text_overlay(display_right, self.current_result)
+                        display_frame = self._draw_3d_text_overlay(display_frame, self.current_result)
                     
-                    # Show stereo view
-                    stereo_view = cv2.hconcat([display_left, display_right])
-                    cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 30),
+                    # Add frame counter
+                    cv2.putText(display_frame, f"Frame: {frame_count}", (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    cv2.imshow('AURA AI - Stereo Camera', stereo_view)
+                    
+                    # Show single camera view
+                    cv2.imshow('AURA AI Glasses', display_frame)
                 
                 key = cv2.waitKey(1) & 0xFF
                 

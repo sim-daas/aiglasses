@@ -93,8 +93,8 @@ class GestureKeyboard:
         key_h = int(frame_height * self.KEY_HEIGHT_RATIO)
         spacing = int(frame_width * self.KEY_SPACING_RATIO)
         
-        # Starting position (centered horizontally, bottom 40% of frame)
-        start_y = int(frame_height * 0.55)
+        # Center the keyboard vertically in the middle 50% of frame
+        start_y = int(frame_height * 0.35)  # Start at 35% from top
         
         # Build key rectangles for each row
         for row_idx, row in enumerate(self.KEYBOARD_LAYOUT):
@@ -212,19 +212,23 @@ class GestureKeyboard:
         # Create overlay
         overlay = frame.copy()
         
-        # Draw text input area
-        text_area_h = int(h * 0.15)
-        cv2.rectangle(overlay, (10, 10), (w - 10, text_area_h), (20, 20, 20), -1)
-        cv2.rectangle(overlay, (10, 10), (w - 10, text_area_h), (100, 100, 100), 2)
+        # Draw text input area at top
+        text_area_h = int(h * 0.12)
+        text_area_y = int(h * 0.05)
+        cv2.rectangle(overlay, (20, text_area_y), (w - 20, text_area_y + text_area_h), 
+                     (20, 20, 20), -1)
+        cv2.rectangle(overlay, (20, text_area_y), (w - 20, text_area_y + text_area_h), 
+                     (100, 100, 100), 2)
         
         # Display typed text
         display_text = self.typed_text if len(self.typed_text) < 50 else "..." + self.typed_text[-47:]
-        cv2.putText(overlay, display_text, (20, int(text_area_h * 0.6)), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        text_y = text_area_y + int(text_area_h * 0.7)
+        cv2.putText(overlay, display_text, (30, text_y), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
         # Character count
         char_count = f"{len(self.typed_text)} chars"
-        cv2.putText(overlay, char_count, (w - 150, int(text_area_h * 0.6)),
+        cv2.putText(overlay, char_count, (w - 150, text_y),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
         
         status = "Point at key and pinch to type"
@@ -256,7 +260,7 @@ class GestureKeyboard:
             )
             
             normalized_pinch = pinch_dist / (hand_scale + 1e-6)
-            is_pinching = normalized_pinch < 0.5
+            is_pinching = normalized_pinch < 0.20  # Reduced from 0.5 to 0.35 for easier pinch detection
             
             # Check which key is being pointed at
             hover_key = self._get_key_at_point(idx_tip_x, idx_tip_y)
@@ -321,11 +325,11 @@ class GestureKeyboard:
         # Draw keyboard
         self._draw_keyboard(overlay, hover_key)
         
-        # Draw status
-        status_y = int(h * 0.52)
-        cv2.rectangle(overlay, (10, status_y - 30), (w - 10, status_y + 5), 
+        # Draw status below keyboard
+        status_y = int(h * 0.75)
+        cv2.rectangle(overlay, (20, status_y - 30), (w - 20, status_y + 5), 
                      (30, 30, 30), -1)
-        cv2.putText(overlay, status, (20, status_y),
+        cv2.putText(overlay, status, (30, status_y),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 100), 2)
         
         # Blend overlay
