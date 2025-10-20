@@ -5,8 +5,8 @@ load_dotenv()
 
 class Config:
     # Camera settings
-    CAMERA_LEFT_INDEX = 0
-    CAMERA_RIGHT_INDEX = 1
+    CAMERA_LEFT_INDEX = "/dev/video0"
+    CAMERA_RIGHT_INDEX = "/dev/video1"
     CAMERA_WIDTH = 640
     CAMERA_HEIGHT = 480
     CAMERA_FPS = 30
