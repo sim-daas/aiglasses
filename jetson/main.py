@@ -23,7 +23,7 @@ from web_server import WebServer
 from config import Config
 
 class AURAGlasses:
-    def __init__(self):
+    def __init__(self, test_mode=False):
         print("🚀 Initializing AURA AI Glasses...")
         
         # Initialize components
@@ -40,14 +40,80 @@ class AURAGlasses:
         
         # State
         self.recording = False
+        self.test_mode = test_mode
         
         print("✅ AURA AI Glasses initialized!")
-        print("🎤 Audio devices:")
-        self.audio.list_devices()
+        
+        if not test_mode:
+            print("🎤 Audio devices:")
+            self.audio.list_devices()
+        
         print("\n📝 Instructions:")
         print("   - Open browser to http://<jetson-ip>:5000")
-        print("   - Press SPACE to start/stop recording")
+        if test_mode:
+            print("   - Press 't' to send TEST query")
+        else:
+            print("   - Press SPACE to start/stop recording")
         print("   - Press Q to quit\n")
+    
+    def process_test_query(self):
+        """Process a hardcoded test query without audio"""
+        print("\n" + "="*50)
+        print("🧪 TEST MODE - Processing hardcoded query")
+        print("="*50)
+        
+        try:
+            # Get current frame
+            frame_left, frame_right, depth_map = self.camera.get_frames()
+            
+            if frame_left is None:
+                print("❌ No camera frame available")
+                return
+            
+            # Save frame to temporary file
+            image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
+            cv2.imwrite(image_file.name, frame_right)  # Use right camera
+            
+            print("📸 Frame captured")
+            
+            # Hardcoded test query
+            test_query = "What objects do you see in this image?"
+            print(f"📝 Test Query: {test_query}")
+            
+            print("🔄 Sending to Gemini API...")
+            
+            # Process with Gemini (text query, no audio)
+            result = self.gemini.process_multimodal_query(
+                image_path=image_file.name,
+                text_query=test_query
+            )
+            
+            # Add depth information
+            pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
+            pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
+            depth_value = self.camera.get_depth_at_point(pos_x, pos_y)
+            
+            result['position']['z'] = depth_value
+            result['position']['depth_normalized'] = depth_value
+            
+            # Display results
+            print("\n📊 RESULTS:")
+            print(f"   Q: {result['transcription']}")
+            print(f"   A: {result['answer']}")
+            print(f"   Object: {result['object']}")
+            print(f"   Position: ({result['position']['x']:.2f}, {result['position']['y']:.2f}, {depth_value:.2f})")
+            print(f"   Confidence: {result['position']['confidence']:.2%}")
+            
+            # Broadcast to web clients
+            self.server.broadcast_result(result)
+            
+            # Cleanup temp files
+            os.unlink(image_file.name)
+            
+        except Exception as e:
+            print(f"❌ Processing error: {e}")
+            import traceback
+            traceback.print_exc()
     
     def process_query(self):
         """Process user voice query with Gemini"""
@@ -134,26 +200,36 @@ class AURAGlasses:
         print(f"\n🌐 Web interface: http://localhost:{Config.SERVER_PORT}")
         print("   (or http://<jetson-ip>:5000 from tablet)\n")
         
-        # Main interaction loop (keyboard-based for now)
-        print("Press SPACE to record, Q to quit")
+        if self.test_mode:
+            print("🧪 TEST MODE ENABLED")
+            print("Press 't' to test, 'q' to quit\n")
+        else:
+            print("Press SPACE to record, 'q' to quit\n")
         
         try:
             while True:
                 # Display live feed in window for debugging
-                frame_left, _, _ = self.camera.get_frames()
+                frame_left, frame_right, _ = self.camera.get_frames()
                 
                 if frame_left is not None:
-                    cv2.imshow('AURA AI - Left Camera', frame_left)
+                    # Show stereo view
+                    stereo_view = cv2.hconcat([frame_left, frame_right])
+                    cv2.imshow('AURA AI - Stereo Camera', stereo_view)
                 
                 key = cv2.waitKey(1) & 0xFF
                 
-                if key == ord(' '):  # Spacebar
+                if key == ord('t') and self.test_mode:
+                    # Test mode: send hardcoded query
+                    self.process_test_query()
+                
+                elif key == ord(' ') and not self.test_mode:
+                    # Normal mode: record audio
                     if not self.recording:
                         self.process_query()
                     else:
                         self.stop_query()
                 
-                elif key == ord('q'):  # Quit
+                elif key == ord('q'):
                     print("\n👋 Shutting down...")
                     break
                 
@@ -174,8 +250,16 @@ class AURAGlasses:
 
 def main():
     """Main entry point"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="AURA AI Glasses")
+    parser.add_argument('--test', action='store_true',
+                       help='Enable test mode (hardcoded queries, no audio)')
+    
+    args = parser.parse_args()
+    
     try:
-        app = AURAGlasses()
+        app = AURAGlasses(test_mode=args.test)
         app.run()
     except Exception as e:
         print(f"❌ Fatal error: {e}")
