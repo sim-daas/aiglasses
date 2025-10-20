@@ -4,34 +4,254 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AURA AI Glasses</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <title>AURA AI Glasses - 3D Overlay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+        }
+
+        #wrap {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #feed {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* 3D text card overlay */
+        .card3d {
+            position: absolute;
+            left: 0;
+            top: 0;
+            transform-origin: 50% 50%;
+            padding: 12px 16px;
+            width: 260px;
+            /* base width before scaling */
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(0, 255, 160, 0.35);
+            border-radius: 14px;
+            backdrop-filter: blur(6px);
+            color: #7bff93;
+            font: 700 22px/1.18 "Inter", system-ui;
+            text-shadow: 0 0 6px #00ff88, 0 0 14px #00ff88;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+            will-change: transform;
+        }
+
+        /* Parent holds camera perspective for 3D look */
+        #cards {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            perspective: 900px;
+        }
+
+        /* Status overlay */
+        #status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 255, 0, 0.5);
+            font-size: 14px;
+            z-index: 100;
+        }
+
+        .status-connected {
+            color: #0f0;
+        }
+
+        .status-disconnected {
+            color: #f00;
+        }
+    </style>
 </head>
 
 <body>
-    <div id="container">
-        <!-- Video feed -->
-        <img id="video-feed" src="/video_feed" alt="Camera Feed">
-
-        <!-- 3D Canvas overlay -->
-        <canvas id="three-canvas"></canvas>
-
-        <!-- Status overlay -->
-        <div id="status-overlay">
-            <div id="status-text">Connecting...</div>
-            <div id="query-text"></div>
-            <div id="answer-container">
-                <div id="answer-text"></div>
-            </div>
-        </div>
-
-        <!-- Audio player (hidden) -->
-        <audio id="audio-player" autoplay></audio>
+    <div id="wrap">
+        <img id="feed" src="/video_feed" alt="Camera Feed" />
+        <div id="cards"></div>
+        <div id="status" class="status-disconnected">Connecting...</div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        console.log('🚀 AURA AI Glasses - 3D Overlay System');
+
+        const wrap = document.getElementById('wrap');
+        const feed = document.getElementById('feed');
+        const cards = document.getElementById('cards');
+        const status = document.getElementById('status');
+        const panels = new Map(); // id -> DOM element
+
+        // Convert image coordinates to screen coordinates
+        function imgToScreen(x, y) {
+            const vw = wrap.clientWidth,
+                vh = wrap.clientHeight;
+            const imgW = 640,
+                imgH = 480; // Camera resolution
+            const s = Math.min(vw / imgW, vh / imgH);
+            const dispW = imgW * s,
+                dispH = imgH * s;
+            const offX = (vw - dispW) / 2,
+                offY = (vh - dispH) / 2;
+            return [offX + x * s, offY + y * s];
+        }
+
+        // Create or get panel element
+        function ensurePanel(id, text) {
+            if (!panels.has(id)) {
+                const el = document.createElement('div');
+                el.className = 'card3d';
+                cards.appendChild(el);
+                panels.set(id, el);
+            }
+            const el = panels.get(id);
+            el.innerHTML = text.replace(/\n/g, '<br/>');
+            return el;
+        }
+
+        // Position panel in 3D using quad corners
+        function placePanel3D(el, corners) {
+            if (!corners || corners.length !== 4) {
+                el.style.display = 'none';
+                return;
+            }
+
+            const [a, b, c, d] = corners;
+            // clockwise: top-left, top-right, bottom-right, bottom-left
+
+            // Convert to screen space
+            const [ax, ay] = imgToScreen(a[0], a[1]);
+            const [bx, by] = imgToScreen(b[0], b[1]);
+            const [cx, cy] = imgToScreen(c[0], c[1]);
+            const [dx, dy] = imgToScreen(d[0], d[1]);
+
+            // Calculate center
+            const cxm = (ax + bx + cx + dx) / 4;
+            const cym = (ay + by + cy + dy) / 4;
+
+            // Calculate edge lengths
+            const lenTop = Math.hypot(bx - ax, by - ay);
+            const lenBot = Math.hypot(cx - dx, cy - dy);
+
+            // Yaw (rotation around Z-axis) from top edge angle
+            const yawDeg = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
+
+            // Pitch (rotation around X-axis) from perspective foreshortening
+            const pitchRatio = (lenTop - lenBot) / Math.max(1, (lenTop + lenBot) / 2);
+            const pitchDeg = Math.max(-55, Math.min(55, pitchRatio * 75));
+
+            // Scale from average width
+            const targetW = (lenTop + lenBot) / 2;
+            const scale = Math.max(0.5, Math.min(3.0, targetW / 260));
+
+            // Apply 3D transform
+            el.style.display = 'block';
+            el.style.left = `${cxm}px`;
+            el.style.top = `${cym}px`;
+            el.style.transform = `
+                translate(-50%, -50%)
+                rotateZ(${yawDeg}deg)
+                rotateX(${pitchDeg}deg)
+                scale(${scale})
+            `;
+        }
+
+        // Socket.IO connection
+        const socket = io(window.location.origin, {
+            path: '/socket.io',
+            transports: ['polling', 'websocket'],
+            reconnection: true
+        });
+
+        socket.on('connect', () => {
+            console.log('✅ Connected to server');
+            status.textContent = '✅ Connected';
+            status.className = 'status-connected';
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.log('❌ Disconnected:', reason);
+            status.textContent = `❌ Disconnected: ${reason}`;
+            status.className = 'status-disconnected';
+        });
+
+        socket.on('gemini_result', (result) => {
+            console.log('📡 Gemini result received:', result);
+
+            // Create overlay from result
+            const overlays = [{
+                id: 1,
+                text: `${result.answer}\n[${result.object}]`,
+                corners: result.corners || generateCornersFromPosition(result.position, result.location)
+            }];
+
+            const live = new Set();
+            overlays.forEach(o => {
+                const text = o.text || o.label || '…';
+                const el = ensurePanel(o.id || 0, text);
+                placePanel3D(el, o.corners);
+                live.add(o.id || 0);
+            });
+
+            // Hide stale panels
+            panels.forEach((el, id) => {
+                if (!live.has(id)) el.style.display = 'none';
+            });
+        });
+
+        // Generate corners from position and location (fallback if no corners provided)
+        function generateCornersFromPosition(position, location) {
+            const imgW = 640,
+                imgH = 480;
+
+            // Map location to normalized position
+            const locationMap = {
+                'top-left': [0.20, 0.20],
+                'top-center': [0.50, 0.20],
+                'top-right': [0.80, 0.20],
+                'center-left': [0.20, 0.50],
+                'center': [0.50, 0.50],
+                'center-right': [0.80, 0.50],
+                'bottom-left': [0.20, 0.80],
+                'bottom-center': [0.50, 0.80],
+                'bottom-right': [0.80, 0.80]
+            };
+
+            const [nx, ny] = locationMap[location] || [0.5, 0.5];
+            const cx = nx * imgW;
+            const cy = ny * imgH;
+
+            // Create a simple quad (can be enhanced with depth info)
+            const size = 100; // Base size
+            return [
+                [cx - size, cy - size], // top-left
+                [cx + size, cy - size], // top-right
+                [cx + size, cy + size], // bottom-right
+                [cx - size, cy + size] // bottom-left
+            ];
+        }
+
+        console.log('✅ 3D Overlay system initialized');
+    </script>
 </body>
 
 </html>

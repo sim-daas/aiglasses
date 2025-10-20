@@ -304,10 +304,10 @@ class AURAGlasses:
                     
                     # Process gesture keyboard if enabled
                     if self.use_gesture_kb and self.gesture_keyboard:
-                        display_frame, status, should_submit = self.gesture_keyboard.process_frame(display_frame)
-                        
-                        # Apply digital zoom if zoom level > 1.0
+                        # Get zoom level before processing
                         zoom_level = self.gesture_keyboard.get_zoom_level()
+                        
+                        # Apply digital zoom to camera feed BEFORE adding keyboard overlay
                         if zoom_level > 1.0:
                             h, w = display_frame.shape[:2]
                             # Calculate crop region for zoom
@@ -320,14 +320,15 @@ class AURAGlasses:
                             cropped = display_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                             display_frame = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
                         
+                        # Process keyboard overlay AFTER zoom (keyboard stays same size)
+                        display_frame, status, should_submit = self.gesture_keyboard.process_frame(display_frame)
+                        
                         if should_submit:
                             query = self.gesture_keyboard.get_text().strip()
                             if query:
                                 self.process_gesture_query(query)
                     
-                    # Add 3D text overlay if we have results
-                    if self.current_result:
-                        display_frame = self._draw_3d_text_overlay(display_frame, self.current_result)
+                    # NO 3D text overlay in test mode - using web CSS 3D instead
                     
                     # Add frame counter
                     cv2.putText(display_frame, f"Frame: {frame_count}", (10, 30),

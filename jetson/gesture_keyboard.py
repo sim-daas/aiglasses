@@ -113,14 +113,14 @@ class GestureKeyboard:
                 row_width = len(row) * key_w + (len(row) - 1) * spacing
             elif row_idx == 3:  # Special keys row (SPACE, BACK, SUBMIT)
                 row_width = key_w * 5 + spacing * 2
-            else:  # Zoom controls row
-                row_width = key_w * 2 + spacing
+            else:  # Zoom controls row - add extra spacing
+                row_width = key_w * 2 + key_w + spacing * 2  # Two buttons + one button width spacing
             
             start_x = (frame_width - row_width) // 2
             current_x = start_x
             current_y = start_y + row_idx * (key_h + spacing)
             
-            for key in row:
+            for key_idx, key in enumerate(row):
                 if key == 'SPACE':
                     # Space key is wider
                     w = key_w * 3
@@ -132,6 +132,10 @@ class GestureKeyboard:
                 # Store key rectangle: (x, y, width, height)
                 self.key_rects[key] = (current_x, current_y, w, key_h)
                 current_x += w + spacing
+                
+                # Add extra spacing after ZOOM+ button (one button width)
+                if row_idx == 4 and key == 'ZOOM+':
+                    current_x += key_w
         
         self.keyboard_initialized = True
         logger.info(f"Keyboard layout initialized: {len(self.key_rects)} keys")
