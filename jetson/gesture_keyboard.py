@@ -1,6 +1,6 @@
 """
-Gesture-based Virtual Keyboard using MediaPipe Hand Tracking
-Allows text input through hand gestures for AI glasses interface
+Gesture-based Virtual QWERTY Keyboard using MediaPipe Hand Tracking
+Full keyboard layout with point-and-pinch interaction
 """
 import math
 import time
@@ -17,25 +17,25 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class GestureKeyboard:
-    """Virtual keyboard controlled by hand gestures"""
+    """Full QWERTY keyboard controlled by hand gestures"""
     
-    # Pie sectors (angles in degrees, 0° = right, CCW)
-    SECTORS = [
-        ("ABC",   0),
-        ("DEF",  45),
-        ("GHI",  90),
-        ("JKL", 135),
-        ("MNO", 180),
-        ("PQRS", 225),
-        ("TUV", 270),
-        ("WXYZ", 315),
+    # Full QWERTY keyboard layout (4 rows)
+    KEYBOARD_LAYOUT = [
+        ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+        ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+        ['Z', 'X', 'C', 'V', 'B', 'N', 'M'],
+        ['SPACE', 'BACK', 'SUBMIT']
     ]
-    SECTOR_WIDTH_DEG = 45
+    
+    # Key dimensions (relative to frame size)
+    KEY_WIDTH_RATIO = 0.065   # Each key is ~6.5% of frame width
+    KEY_HEIGHT_RATIO = 0.08   # Each key is ~8% of frame height
+    KEY_SPACING_RATIO = 0.01  # 1% spacing between keys
     
     # Gesture timing
-    SUBMIT_HOLD_S = 1.0      # 3-finger hold to submit
-    BACKSPACE_HOLD_S = 0.6   # open palm hold to backspace
-    SPACE_COOLDOWN = 0.25    # prevent rapid space
+    PINCH_COOLDOWN = 0.3      # Prevent rapid repeated selections
+    SUBMIT_HOLD_S = 1.5       # Hold time to submit
+    BACKSPACE_HOLD_S = 0.5    # Hold time for continuous backspace
     
     def __init__(self):
         """Initialize gesture keyboard"""
@@ -47,21 +47,23 @@ class GestureKeyboard:
         self.hands = self.mp_hands.Hands(
             max_num_hands=1,
             model_complexity=0,
-            min_detection_confidence=0.5,
+            min_detection_confidence=0.6,
             min_tracking_confidence=0.5
         )
         self.draw_utils = mp.solutions.drawing_utils
         
         # State
         self.typed_text = ""
-        self.last_commit_time = 0
-        self.three_hold_start = None
+        self.last_key_time = 0
+        self.submit_hold_start = None
         self.backspace_hold_start = None
-        self.pinch_down = False
-        self.pinch_start_time = 0
-        self.selected_group = None
+        self.last_backspace_time = 0
         
-        logger.info("✅ Gesture keyboard initialized")
+        # Key positions (computed on first frame)
+        self.key_rects = {}
+        self.keyboard_initialized = False
+        
+        logger.info("✅ Full QWERTY gesture keyboard initialized")
     
     def reset_text(self):
         """Clear typed text"""
@@ -72,77 +74,117 @@ class GestureKeyboard:
         return self.typed_text
     
     @staticmethod
-    def _v2(a, b):
-        """Vector from point a to b"""
-        return np.array([b.x - a.x, b.y - a.y], dtype=np.float32)
-    
-    @staticmethod
     def _norm(x):
         """Vector norm with epsilon"""
         return max(1e-6, np.linalg.norm(x))
     
     @staticmethod
-    def _clamp(x, a, b):
-        """Clamp value between a and b"""
-        return a if x < a else b if x > b else x
+    def _distance(p1, p2):
+        """2D distance between two points"""
+        return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
     
-    def _angle_deg(self, v):
-        """Get angle in degrees from vector"""
-        a = math.degrees(math.atan2(-v[1], v[0]))  # y-up screen space
-        return (a + 360.0) % 360.0
-    
-    def _angle_diff(self, a, b):
-        """Get absolute difference between two angles"""
-        d = (a - b + 180) % 360 - 180
-        return abs(d)
-    
-    def _sector_from_angle(self, theta):
-        """Get sector name from angle"""
-        best_diff, name = 1e9, None
-        for name_i, center in self.SECTORS:
-            d = self._angle_diff(theta, center)
-            if d < best_diff:
-                best_diff = d
-                name = name_i
-        return name if best_diff <= self.SECTOR_WIDTH_DEG / 2 else None
-    
-    def _letter_from_group(self, group, radius_ratio):
-        """Choose letter from group based on pinch radius"""
-        if len(group) == 3:
-            if radius_ratio < 0.33: return group[0]
-            if radius_ratio < 0.66: return group[1]
-            return group[2]
-        else:  # 4 letters
-            if radius_ratio < 0.25: return group[0]
-            if radius_ratio < 0.5:  return group[1]
-            if radius_ratio < 0.75: return group[2]
-            return group[3]
-    
-    def _fingers_state(self, lm):
-        """Detect finger states"""
-        idx_up = lm[8].y < lm[6].y
-        mid_up = lm[12].y < lm[10].y
-        rng_up = lm[16].y < lm[14].y
-        pnk_up = lm[20].y < lm[18].y
+    def _initialize_keyboard_layout(self, frame_width, frame_height):
+        """Initialize keyboard layout based on frame size"""
+        if self.keyboard_initialized:
+            return
         
-        count = sum([idx_up, mid_up, rng_up])
-        open_palm = idx_up and mid_up and rng_up and pnk_up
-        two_pinch = idx_up and mid_up and (not pnk_up)
-        three = idx_up and mid_up and rng_up
+        # Calculate dimensions
+        key_w = int(frame_width * self.KEY_WIDTH_RATIO)
+        key_h = int(frame_height * self.KEY_HEIGHT_RATIO)
+        spacing = int(frame_width * self.KEY_SPACING_RATIO)
         
-        return count, open_palm, two_pinch, three
+        # Starting position (centered horizontally, bottom 40% of frame)
+        start_y = int(frame_height * 0.55)
+        
+        # Build key rectangles for each row
+        for row_idx, row in enumerate(self.KEYBOARD_LAYOUT):
+            # Calculate row width for centering
+            if row_idx < 3:  # Letter rows
+                row_width = len(row) * key_w + (len(row) - 1) * spacing
+            else:  # Special keys row
+                # SPACE is 3x wider
+                row_width = key_w * 5 + spacing * 2
+            
+            start_x = (frame_width - row_width) // 2
+            current_x = start_x
+            current_y = start_y + row_idx * (key_h + spacing)
+            
+            for key in row:
+                if key == 'SPACE':
+                    # Space key is wider
+                    w = key_w * 3
+                elif key in ['BACK', 'SUBMIT']:
+                    w = key_w
+                else:
+                    w = key_w
+                
+                # Store key rectangle: (x, y, width, height)
+                self.key_rects[key] = (current_x, current_y, w, key_h)
+                current_x += w + spacing
+        
+        self.keyboard_initialized = True
+        logger.info(f"Keyboard layout initialized: {len(self.key_rects)} keys")
     
-    def _commit_char(self, ch):
-        """Add character to typed text"""
-        self.typed_text += ch
-        self.last_commit_time = time.time()
-        logger.info(f"Typed: {self.typed_text}")
+    def _get_key_at_point(self, x, y):
+        """Get key at given point (x, y)"""
+        for key, (kx, ky, kw, kh) in self.key_rects.items():
+            if kx <= x <= kx + kw and ky <= y <= ky + kh:
+                return key
+        return None
     
-    def _backspace(self):
-        """Remove last character"""
-        if self.typed_text:
-            self.typed_text = self.typed_text[:-1]
-            logger.info(f"Backspace: {self.typed_text}")
+    def _draw_keyboard(self, frame, hover_key=None):
+        """Draw the virtual keyboard on frame"""
+        for key, (x, y, w, h) in self.key_rects.items():
+            # Determine key color
+            if key == hover_key:
+                # Highlighted when hovering
+                color = (100, 255, 100)
+                thickness = 3
+                text_color = (0, 255, 0)
+            elif key == 'SUBMIT':
+                color = (100, 200, 255)
+                thickness = 2
+                text_color = (200, 200, 200)
+            elif key == 'BACK':
+                color = (100, 100, 255)
+                thickness = 2
+                text_color = (200, 200, 200)
+            else:
+                color = (80, 80, 80)
+                thickness = 2
+                text_color = (200, 200, 200)
+            
+            # Draw key rectangle
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, thickness)
+            
+            # Draw key label
+            label = key if key not in ['BACK', 'SUBMIT', 'SPACE'] else key[:3]
+            
+            # Calculate text size for centering
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6 if key in ['SPACE', 'BACK', 'SUBMIT'] else 0.8
+            text_size = cv2.getTextSize(label, font, font_scale, 2)[0]
+            
+            text_x = x + (w - text_size[0]) // 2
+            text_y = y + (h + text_size[1]) // 2
+            
+            cv2.putText(frame, label, (text_x, text_y), 
+                       font, font_scale, text_color, 2)
+    
+    def _commit_key(self, key):
+        """Add key to typed text"""
+        now = time.time()
+        
+        if key == 'SPACE':
+            self.typed_text += " "
+        elif key == 'BACK':
+            if self.typed_text:
+                self.typed_text = self.typed_text[:-1]
+        elif key != 'SUBMIT':
+            self.typed_text += key.lower()
+        
+        self.last_key_time = now
+        logger.info(f"Key pressed: {key} → Text: '{self.typed_text}'")
     
     def process_frame(self, frame):
         """
@@ -156,6 +198,9 @@ class GestureKeyboard:
         """
         h, w = frame.shape[:2]
         
+        # Initialize keyboard layout
+        self._initialize_keyboard_layout(w, h)
+        
         # Convert to RGB for MediaPipe
         if frame.ndim == 2 or frame.shape[2] == 1:
             frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
@@ -164,155 +209,127 @@ class GestureKeyboard:
         # Process hand detection
         results = self.hands.process(rgb)
         
-        # Create overlay - ALWAYS CREATE IT
+        # Create overlay
         overlay = frame.copy()
         
-        # Draw UI - ALWAYS VISIBLE
-        cx, cy = w // 2, h // 2
-        radius_ui = int(min(w, h) * 0.35)
+        # Draw text input area
+        text_area_h = int(h * 0.15)
+        cv2.rectangle(overlay, (10, 10), (w - 10, text_area_h), (20, 20, 20), -1)
+        cv2.rectangle(overlay, (10, 10), (w - 10, text_area_h), (100, 100, 100), 2)
         
-        # Draw pie circle (main compass)
-        cv2.circle(overlay, (cx, cy), radius_ui, (60, 60, 60), 2)
+        # Display typed text
+        display_text = self.typed_text if len(self.typed_text) < 50 else "..." + self.typed_text[-47:]
+        cv2.putText(overlay, display_text, (20, int(text_area_h * 0.6)), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
         
-        # Draw sector spokes
-        for sector_name, ang in self.SECTORS:
-            a = math.radians(ang)
-            x2 = int(cx + radius_ui * math.cos(a))
-            y2 = int(cy - radius_ui * math.sin(a))
-            cv2.line(overlay, (cx, cy), (x2, y2), (50, 50, 50), 1)
-            
-            # Draw sector labels
-            label_radius = int(radius_ui * 1.15)
-            x_label = int(cx + label_radius * math.cos(a))
-            y_label = int(cy - label_radius * math.sin(a))
-            cv2.putText(overlay, sector_name, (x_label - 20, y_label),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (150, 150, 150), 1)
+        # Character count
+        char_count = f"{len(self.typed_text)} chars"
+        cv2.putText(overlay, char_count, (w - 150, int(text_area_h * 0.6)),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
         
-        # Draw text display box (at top)
-        cur_text = self.typed_text if len(self.typed_text) < 36 else "…" + self.typed_text[-35:]
-        cv2.rectangle(overlay, (20, 20), (w - 20, 80), (10, 10, 10), -1)
-        cv2.rectangle(overlay, (20, 20), (w - 20, 80), (100, 100, 100), 2)
-        
-        # Show typed text
-        if cur_text:
-            cv2.putText(overlay, cur_text, (30, 65), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-        else:
-            cv2.putText(overlay, "Type with gestures...", (30, 65),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (100, 100, 100), 2)
-        
-        status = "Show hand to start typing"
+        status = "Point at key and pinch to type"
         should_submit = False
+        hover_key = None
         
         # Process hand landmarks
         if results.multi_hand_landmarks:
             hand = results.multi_hand_landmarks[0]
             lm = hand.landmark
             
-            # Get key points
+            # Get index finger tip position (landmark 8)
+            idx_tip_x = int(lm[8].x * w)
+            idx_tip_y = int(lm[8].y * h)
+            
+            # Get thumb tip position (landmark 4)
+            thumb_tip_x = int(lm[4].x * w)
+            thumb_tip_y = int(lm[4].y * h)
+            
+            # Calculate pinch distance
+            pinch_dist = self._distance((idx_tip_x, idx_tip_y), (thumb_tip_x, thumb_tip_y))
+            
+            # Normalize by hand scale
             wrist = lm[0]
-            idx_tip = lm[8]
-            idx_mcp = lm[5]
             mid_mcp = lm[9]
-            th_tip = lm[4]
+            hand_scale = self._distance(
+                (int(wrist.x * w), int(wrist.y * h)),
+                (int(mid_mcp.x * w), int(mid_mcp.y * h))
+            )
             
-            # Orientation vector
-            dir_vec = self._v2(wrist, idx_mcp)
-            theta = self._angle_deg(dir_vec)
+            normalized_pinch = pinch_dist / (hand_scale + 1e-6)
+            is_pinching = normalized_pinch < 0.5
             
-            # Hand scale
-            scale = self._norm(self._v2(wrist, mid_mcp))
+            # Check which key is being pointed at
+            hover_key = self._get_key_at_point(idx_tip_x, idx_tip_y)
             
-            # Pinch distance
-            pinch_dist = self._norm(self._v2(th_tip, idx_tip)) / scale
+            # Draw pointer indicator
+            cv2.circle(overlay, (idx_tip_x, idx_tip_y), 8, (0, 255, 255), -1)
+            cv2.circle(overlay, (idx_tip_x, idx_tip_y), 12, (255, 255, 0), 2)
             
-            # Finger states
-            count, open_palm, two_pinch, three = self._fingers_state(lm)
+            # Draw pinch indicator
+            if is_pinching:
+                cv2.line(overlay, (idx_tip_x, idx_tip_y), (thumb_tip_x, thumb_tip_y),
+                        (0, 255, 0), 3)
             
-            # Pinch detection
-            is_pinch = pinch_dist < 0.35
-            
-            # Select sector on pinch start
-            if is_pinch and not self.pinch_down:
-                self.pinch_down = True
-                self.pinch_start_time = time.time()
-                self.selected_group = self._sector_from_angle(theta)
-                if self.selected_group:
-                    logger.info(f"✋ Pinch started: {self.selected_group}")
-                    status = f"Selected: {self.selected_group}"
-            
-            elif not is_pinch and self.pinch_down:
-                # Commit letter on release
-                if self.selected_group:
-                    r = self._norm(self._v2(wrist, idx_tip)) / (self._norm(self._v2(wrist, idx_mcp)) * 1.6)
-                    r = self._clamp(r, 0.0, 1.0)
-                    ch = self._letter_from_group(self.selected_group, r)
-                    self._commit_char(ch.lower())
-                    status = f"Typed: {ch}"
-                
-                self.pinch_down = False
-                self.selected_group = None
-            
-            # Space / Backspace / Submit
+            # Handle pinch gesture
             now = time.time()
             
-            # Two-finger pinch for space
-            if two_pinch:
-                if now - self.last_commit_time > self.SPACE_COOLDOWN:
-                    self._commit_char(" ")
-                    status = "Space"
-            
-            # Open palm for backspace
-            if open_palm:
-                if self.backspace_hold_start is None:
-                    self.backspace_hold_start = now
-                elif now - self.backspace_hold_start >= self.BACKSPACE_HOLD_S:
-                    self._backspace()
-                    self.backspace_hold_start = None
-                    status = "Backspace"
+            if is_pinching and (now - self.last_key_time > self.PINCH_COOLDOWN):
+                if hover_key:
+                    if hover_key == 'SUBMIT':
+                        # Hold detection for submit
+                        if self.submit_hold_start is None:
+                            self.submit_hold_start = now
+                        elif now - self.submit_hold_start >= self.SUBMIT_HOLD_S:
+                            should_submit = True
+                            status = "Submitting query!"
+                            self.submit_hold_start = None
+                        else:
+                            progress = (now - self.submit_hold_start) / self.SUBMIT_HOLD_S
+                            status = f"Hold to submit... {int(progress * 100)}%"
+                    
+                    elif hover_key == 'BACK':
+                        # Continuous backspace on hold
+                        if self.backspace_hold_start is None:
+                            self.backspace_hold_start = now
+                            self._commit_key('BACK')
+                        elif now - self.backspace_hold_start >= self.BACKSPACE_HOLD_S:
+                            if now - self.last_backspace_time > 0.15:  # Repeat rate
+                                self._commit_key('BACK')
+                                self.last_backspace_time = now
+                        status = "Backspace"
+                    
+                    else:
+                        # Regular key press
+                        self._commit_key(hover_key)
+                        status = f"Typed: {hover_key}"
             else:
+                # Reset hold timers when not pinching
+                self.submit_hold_start = None
                 self.backspace_hold_start = None
             
-            # Three fingers for submit
-            if three:
-                if self.three_hold_start is None:
-                    self.three_hold_start = now
-                    status = "Hold to submit..."
-                elif now - self.three_hold_start >= self.SUBMIT_HOLD_S:
-                    should_submit = True
-                    status = "✓ SUBMITTING!"
-                    logger.info(f"✋ Submitting: '{self.typed_text}'")
-                    self.three_hold_start = None
-            else:
-                self.three_hold_start = None
+            # Update status based on hover
+            if hover_key and not is_pinching:
+                status = f"Hovering: {hover_key}"
             
             # Draw hand landmarks
-            self.draw_utils.draw_landmarks(overlay, hand, self.mp_hands.HAND_CONNECTIONS)
-            
-            # Show current sector
-            if self.selected_group:
-                cv2.putText(overlay, f"{self.selected_group}", (cx - 60, cy - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 220, 180), 2)
-                # Show ring thresholds
-                cv2.circle(overlay, (cx, cy), int(radius_ui * 0.30), (80, 90, 110), 1)
-                cv2.circle(overlay, (cx, cy), int(radius_ui * 0.55), (80, 90, 110), 1)
-                cv2.circle(overlay, (cx, cy), int(radius_ui * 0.80), (80, 90, 110), 1)
-            
-            # Status text
-            cv2.putText(overlay, status, (20, h - 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 220, 90), 2)
+            self.draw_utils.draw_landmarks(
+                overlay, hand, self.mp_hands.HAND_CONNECTIONS,
+                self.draw_utils.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
+                self.draw_utils.DrawingSpec(color=(255, 255, 0), thickness=2)
+            )
         
-        else:
-            # No hand detected
-            self.pinch_down = False
-            self.selected_group = None
-            
-            # Show help text
-            cv2.putText(overlay, status, (20, h - 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
+        # Draw keyboard
+        self._draw_keyboard(overlay, hover_key)
         
-        # Blend UI (make it semi-transparent)
-        frame = cv2.addWeighted(overlay, 0.92, frame, 0.08, 0)
+        # Draw status
+        status_y = int(h * 0.52)
+        cv2.rectangle(overlay, (10, status_y - 30), (w - 10, status_y + 5), 
+                     (30, 30, 30), -1)
+        cv2.putText(overlay, status, (20, status_y),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 100), 2)
+        
+        # Blend overlay
+        frame = cv2.addWeighted(overlay, 0.9, frame, 0.1, 0)
         
         return frame, status, should_submit
     
