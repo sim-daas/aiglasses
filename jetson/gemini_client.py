@@ -93,7 +93,7 @@ Required JSON structure:
     "transcription": "the user's spoken/written question (if audio provided, transcribe it; otherwise use provided text)",
     "answer": "your CONCISE answer (max 15 words) - ALWAYS provide your best guess, never say 'unknown' or 'N/A'",
     "object": "primary object/subject in the image (single word or short phrase, e.g., 'laptop', 'person', 'cup')",
-    "location": "describe WHERE in the image the object is (e.g., 'center', 'left side', 'top-right corner', 'bottom center')"
+    "location": "grid position in image - choose ONE: 'top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right', 'bottom-left', 'bottom-center', 'bottom-right'"
 }}
 
 **EXAMPLE OUTPUT:**
@@ -102,14 +102,22 @@ User asks: "What color is this laptop?"
     "transcription": "What color is this laptop?",
     "answer": "Silver aluminum MacBook Pro",
     "object": "laptop",
-    "location": "center of image"
+    "location": "center"
 }}
+
+**LOCATION GRID:**
+Divide the image into a 3x3 grid:
+- Row 1 (top): top-left, top-center, top-right
+- Row 2 (middle): center-left, center, center-right  
+- Row 3 (bottom): bottom-left, bottom-center, bottom-right
+
+Choose the cell where the PRIMARY object is located.
 
 **RULES:**
 1. Always output ONLY valid JSON (no markdown, no extra text)
 2. Keep "answer" under 15 words
 3. NEVER use "unknown" - make educated guesses based on visual context
-4. "location" should be a natural description (e.g., "on the left", "in the center", "top-right")
+4. "location" MUST be exactly one of the 9 grid positions listed above
 5. Be confident and commit to an answer
 """
     

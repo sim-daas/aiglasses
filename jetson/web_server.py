@@ -291,7 +291,8 @@ class WebServer:
             self.latest_result = result
             
             # Broadcast to all connected clients
-            self.socketio.emit('gemini_result', result, broadcast=True)
+            # Note: use 'room' parameter, not 'broadcast' for Flask-SocketIO
+            self.socketio.emit('gemini_result', result)
             
             logger.info("✅ Broadcast sent successfully")
         except Exception as e:
