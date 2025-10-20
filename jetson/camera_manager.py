@@ -2,13 +2,11 @@ import cv2
 import numpy as np
 import threading
 import time
-import os
 from config import Config
 
 class StereoCamera:
     def __init__(self):
-        self.cap_left = None
-        self.cap_right = None
+        self.cap = None  # Single camera capture
         self.frame_left = None
         self.frame_right = None
         self.depth_map = None
@@ -22,101 +20,48 @@ class StereoCamera:
         )
         
     def initialize(self):
-        """Initialize both cameras using integer indices"""
-        print(f"🎥 Initializing cameras...")
+        """Initialize stereo camera (single device with side-by-side output)"""
+        print(f"🎥 Initializing stereo camera...")
+        print(f"   Device: {Config.CAMERA_DEVICE}")
+        print(f"   Output: {Config.CAMERA_WIDTH}x{Config.CAMERA_HEIGHT} (stereo side-by-side)")
         
-        # Detect available cameras
-        available_cameras = self._detect_cameras()
+        # Open single camera device
+        print(f"📷 Opening {Config.CAMERA_DEVICE}...")
+        self.cap = cv2.VideoCapture(Config.CAMERA_DEVICE)
         
-        if len(available_cameras) < 2:
-            raise RuntimeError(f"Need 2 cameras, found {len(available_cameras)}: {available_cameras}")
+        if not self.cap.isOpened():
+            raise RuntimeError(f"Cannot open camera {Config.CAMERA_DEVICE}")
         
-        # Use the first two available cameras
-        left_idx = available_cameras[0]
-        right_idx = available_cameras[1]
-        
-        print(f"📷 Using camera indices: Left={left_idx}, Right={right_idx}")
-        
-        # Open left camera with integer index
-        print(f"📷 Opening left camera (index {left_idx})...")
-        self.cap_left = cv2.VideoCapture(left_idx)
-        
-        if not self.cap_left.isOpened():
-            raise RuntimeError(f"Cannot open camera index {left_idx}")
-        
-        # Set properties
-        self.cap_left.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_WIDTH)
-        self.cap_left.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_HEIGHT)
-        self.cap_left.set(cv2.CAP_PROP_FPS, Config.CAMERA_FPS)
-        self.cap_left.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # Set properties for full stereo frame
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_WIDTH)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_HEIGHT)
+        self.cap.set(cv2.CAP_PROP_FPS, Config.CAMERA_FPS)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
         # Test read
-        ret, frame = self.cap_left.read()
+        ret, frame = self.cap.read()
         if not ret:
-            self.cap_left.release()
-            raise RuntimeError(f"Camera {left_idx} opened but cannot read frames")
+            self.cap.release()
+            raise RuntimeError(f"Camera opened but cannot read frames")
         
-        print(f"✅ Left camera initialized: {frame.shape[1]}x{frame.shape[0]}")
+        print(f"✅ Camera initialized: {frame.shape[1]}x{frame.shape[0]}")
+        print(f"   Left camera: {Config.SINGLE_CAM_WIDTH}x{Config.SINGLE_CAM_HEIGHT}")
+        print(f"   Right camera: {Config.SINGLE_CAM_WIDTH}x{Config.SINGLE_CAM_HEIGHT}")
         
-        # Wait before opening second camera
-        print("⏳ Waiting before opening second camera...")
-        time.sleep(1.0)
+        # Test frame splitting
+        left, right = self._split_stereo_frame(frame)
+        print(f"✅ Frame split successful: L={left.shape}, R={right.shape}")
         
-        # Open right camera
-        print(f"📷 Opening right camera (index {right_idx})...")
-        self.cap_right = cv2.VideoCapture(right_idx)
+    def _split_stereo_frame(self, stereo_frame):
+        """Split side-by-side stereo frame into left and right images"""
+        height, width = stereo_frame.shape[:2]
+        mid_point = width // 2
         
-        if not self.cap_right.isOpened():
-            self.cap_left.release()
-            raise RuntimeError(f"Cannot open camera index {right_idx}")
+        # Split into left and right halves
+        left_frame = stereo_frame[:, :mid_point]
+        right_frame = stereo_frame[:, mid_point:]
         
-        # Set properties
-        self.cap_right.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_WIDTH)
-        self.cap_right.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_HEIGHT)
-        self.cap_right.set(cv2.CAP_PROP_FPS, Config.CAMERA_FPS)
-        self.cap_right.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        
-        # Test read
-        ret, frame = self.cap_right.read()
-        if not ret:
-            self.cap_left.release()
-            self.cap_right.release()
-            raise RuntimeError(f"Camera {right_idx} opened but cannot read frames")
-        
-        print(f"✅ Right camera initialized: {frame.shape[1]}x{frame.shape[0]}")
-        print(f"✅ Stereo cameras ready at {Config.CAMERA_WIDTH}x{Config.CAMERA_HEIGHT}@{Config.CAMERA_FPS}fps")
-    
-    def _detect_cameras(self):
-        """Detect all available camera indices (not paths)"""
-        print("🔍 Detecting available cameras by index...")
-        available = []
-        
-        # Check indices 0-9
-        for idx in range(10):
-            try:
-                cap = cv2.VideoCapture(idx)
-                if cap.isOpened():
-                    ret, frame = cap.read()
-                    cap.release()
-                    
-                    if ret and frame is not None:
-                        available.append(idx)
-                        print(f"  ✅ Camera {idx} - Working ({frame.shape})")
-                    else:
-                        print(f"  ⚠️  Camera {idx} - Opens but no frames (metadata device?)")
-                
-                # Small delay
-                time.sleep(0.2)
-                
-            except Exception as e:
-                print(f"  ❌ Camera {idx} - Error: {e}")
-        
-        if not available:
-            print("  ⚠️  No working cameras detected!")
-        else:
-            print(f"  📊 Found {len(available)} working camera(s): {available}")
-        
-        return available
+        return left_frame, right_frame
     
     def start(self):
         """Start capture thread"""
@@ -128,19 +73,18 @@ class StereoCamera:
     def _capture_loop(self):
         """Continuous capture loop"""
         while self.running:
-            ret_left, frame_left = self.cap_left.read()
-            ret_right, frame_right = self.cap_right.read()
+            ret, stereo_frame = self.cap.read()
             
-            if ret_left and ret_right:
+            if ret:
+                # Split into left and right frames
+                left, right = self._split_stereo_frame(stereo_frame)
+                
                 with self.lock:
-                    self.frame_left = frame_left
-                    self.frame_right = frame_right
-                    self._compute_depth(frame_left, frame_right)
+                    self.frame_left = left
+                    self.frame_right = right
+                    self._compute_depth(left, right)
             else:
-                if not ret_left:
-                    print("⚠️  Left camera read failed")
-                if not ret_right:
-                    print("⚠️  Right camera read failed")
+                print("⚠️  Camera read failed")
             
             time.sleep(1 / Config.CAMERA_FPS)
     
@@ -184,15 +128,11 @@ class StereoCamera:
             return float(np.mean(region))
     
     def stop(self):
-        """Stop cameras"""
+        """Stop camera"""
         self.running = False
         
-        if self.cap_left:
-            self.cap_left.release()
-            print("✅ Left camera released")
-        
-        if self.cap_right:
-            self.cap_right.release()
-            print("✅ Right camera released")
+        if self.cap:
+            self.cap.release()
+            print("✅ Camera released")
         
         cv2.destroyAllWindows()

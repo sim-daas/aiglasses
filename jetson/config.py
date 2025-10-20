@@ -4,13 +4,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    # Camera settings - use INTEGER indices (not device paths) for Jetson
-    # This is more reliable than /dev/video* paths
-    CAMERA_LEFT_INDEX = 0   # First camera
-    CAMERA_RIGHT_INDEX = "/dev/video1"  # Second camera
-    CAMERA_WIDTH = 640
-    CAMERA_HEIGHT = 480
+    # Camera settings - Single stereo camera outputting side-by-side frames
+    CAMERA_DEVICE = "/dev/video0"  # Single device with stereo output
+    CAMERA_WIDTH = 640   # Full width (both cameras side-by-side)
+    CAMERA_HEIGHT = 240  # Height
     CAMERA_FPS = 30
+    
+    # Individual camera dimensions (half of full width)
+    SINGLE_CAM_WIDTH = 320   # Each camera is 320 pixels wide
+    SINGLE_CAM_HEIGHT = 240  # Same height
     
     # Audio settings
     AUDIO_RATE = 16000
@@ -20,7 +22,7 @@ class Config:
     
     # Gemini API
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-    GEMINI_MODEL = 'models/gemini-2.5-flash'  # Best multimodal model
+    GEMINI_MODEL = 'models/gemini-1.5-pro'  # Best multimodal model
     GEMINI_MAX_RETRIES = 3
     GEMINI_RETRY_DELAY = 2  # seconds
     
