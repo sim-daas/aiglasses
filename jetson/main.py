@@ -10,6 +10,15 @@ import threading
 import tempfile
 import os
 import cv2
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Suppress ALSA warnings
 os.environ['ALSA_CARD'] = 'default'
@@ -24,105 +33,126 @@ from config import Config
 
 class AURAGlasses:
     def __init__(self, test_mode=False):
-        print("🚀 Initializing AURA AI Glasses...")
+        logger.info("🚀 Initializing AURA AI Glasses...")
         
         # Initialize components
+        logger.info("Initializing camera manager...")
         self.camera = StereoCamera()
+        
+        logger.info("Initializing audio manager...")
         self.audio = AudioManager()
+        
+        logger.info("Initializing Gemini client...")
         self.gemini = GeminiClient()
         
         # Initialize cameras
+        logger.info("Starting camera capture...")
         self.camera.initialize()
         self.camera.start()
         
         # Initialize web server
+        logger.info("Initializing web server...")
         self.server = WebServer(self.camera)
         
         # State
         self.recording = False
         self.test_mode = test_mode
         
-        print("✅ AURA AI Glasses initialized!")
+        logger.info("✅ AURA AI Glasses initialized!")
         
         if not test_mode:
-            print("🎤 Audio devices:")
+            logger.info("🎤 Audio devices:")
             self.audio.list_devices()
         
-        print("\n📝 Instructions:")
-        print("   - Open browser to http://<jetson-ip>:5000")
+        logger.info("\n📝 Instructions:")
+        logger.info("   - Open browser to http://<jetson-ip>:5000")
         if test_mode:
-            print("   - Press 't' to send TEST query")
+            logger.info("   - Press 't' to send TEST query")
         else:
-            print("   - Press SPACE to start/stop recording")
-        print("   - Press Q to quit\n")
+            logger.info("   - Press SPACE to start/stop recording")
+        logger.info("   - Press Q to quit\n")
     
     def process_test_query(self):
         """Process a hardcoded test query without audio"""
-        print("\n" + "="*50)
-        print("🧪 TEST MODE - Processing hardcoded query")
-        print("="*50)
+        logger.info("="*50)
+        logger.info("🧪 TEST MODE - Processing hardcoded query")
+        logger.info("="*50)
         
         try:
             # Get current frame
+            logger.info("Step 1/6: Getting camera frame...")
             frame_left, frame_right, depth_map = self.camera.get_frames()
             
             if frame_left is None:
-                print("❌ No camera frame available")
+                logger.error("❌ No camera frame available")
                 return
             
-            # Save frame to temporary file
-            image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
-            cv2.imwrite(image_file.name, frame_right)  # Use right camera
+            logger.info(f"✅ Frame captured: L={frame_left.shape}, R={frame_right.shape}")
             
-            print("📸 Frame captured")
+            # Save frame to temporary file
+            logger.info("Step 2/6: Saving frame to temp file...")
+            image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
+            cv2.imwrite(image_file.name, frame_right)
+            logger.info(f"✅ Frame saved to: {image_file.name}")
             
             # Hardcoded test query
             test_query = "What objects do you see in this image?"
-            print(f"📝 Test Query: {test_query}")
+            logger.info(f"Step 3/6: Using test query: '{test_query}'")
             
-            print("🔄 Sending to Gemini API...")
+            # Process with Gemini
+            logger.info("Step 4/6: Sending to Gemini API...")
+            logger.info(f"   Image: {image_file.name}")
+            logger.info(f"   Query: {test_query}")
+            logger.info("   (This may take 5-10 seconds...)")
             
-            # Process with Gemini (text query, no audio)
             result = self.gemini.process_multimodal_query(
                 image_path=image_file.name,
                 text_query=test_query
             )
             
+            logger.info("✅ Received response from Gemini")
+            
             # Add depth information
+            logger.info("Step 5/6: Calculating depth information...")
             pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
             pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
             depth_value = self.camera.get_depth_at_point(pos_x, pos_y)
             
             result['position']['z'] = depth_value
             result['position']['depth_normalized'] = depth_value
+            logger.info(f"✅ Depth at ({pos_x}, {pos_y}): {depth_value:.3f}")
             
             # Display results
-            print("\n📊 RESULTS:")
-            print(f"   Q: {result['transcription']}")
-            print(f"   A: {result['answer']}")
-            print(f"   Object: {result['object']}")
-            print(f"   Position: ({result['position']['x']:.2f}, {result['position']['y']:.2f}, {depth_value:.2f})")
-            print(f"   Confidence: {result['position']['confidence']:.2%}")
+            logger.info("Step 6/6: Broadcasting results...")
+            logger.info("📊 RESULTS:")
+            logger.info(f"   Q: {result['transcription']}")
+            logger.info(f"   A: {result['answer']}")
+            logger.info(f"   Object: {result['object']}")
+            logger.info(f"   Position: ({result['position']['x']:.2f}, {result['position']['y']:.2f}, {depth_value:.2f})")
+            logger.info(f"   Confidence: {result['position']['confidence']:.2%}")
             
             # Broadcast to web clients
+            logger.info("Broadcasting to web clients...")
             self.server.broadcast_result(result)
+            logger.info("✅ Broadcast complete!")
             
             # Cleanup temp files
             os.unlink(image_file.name)
+            logger.info("✅ Test query processing complete!")
             
         except Exception as e:
-            print(f"❌ Processing error: {e}")
+            logger.error(f"❌ Processing error: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.format_exc())
     
     def process_query(self):
         """Process user voice query with Gemini"""
-        print("\n" + "="*50)
-        print("🎤 Recording... (release to process)")
+        logger.info("\n" + "="*50)
+        logger.info("🎤 Recording... (release to process)")
         
         # Start audio recording
         if not self.audio.start_recording():
-            print("❌ Failed to start recording")
+            logger.error("❌ Failed to start recording")
             return
         
         self.recording = True
@@ -134,13 +164,13 @@ class AURAGlasses:
         
         self.recording = False
         
-        print("⏹️  Recording stopped, processing...")
+        logger.info("⏹️  Recording stopped, processing...")
         
         # Stop recording and get audio file
         audio_file = self.audio.stop_recording()
         
         if not audio_file:
-            print("❌ No audio recorded")
+            logger.error("❌ No audio recorded")
             return
         
         try:
@@ -148,14 +178,14 @@ class AURAGlasses:
             frame_left, frame_right, depth_map = self.camera.get_frames()
             
             if frame_left is None:
-                print("❌ No camera frame available")
+                logger.error("❌ No camera frame available")
                 return
             
             # Save frame to temporary file
             image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
             cv2.imwrite(image_file.name, frame_right)  # Use right camera
             
-            print("📸 Frame captured, sending to Gemini...")
+            logger.info("📸 Frame captured, sending to Gemini...")
             
             # Process with Gemini
             result = self.gemini.process_multimodal_query(
@@ -172,81 +202,99 @@ class AURAGlasses:
             result['position']['depth_normalized'] = depth_value
             
             # Display results
-            print("\n📊 RESULTS:")
-            print(f"   Q: {result['transcription']}")
-            print(f"   A: {result['answer']}")
-            print(f"   Object: {result['object']}")
-            print(f"   Position: ({result['position']['x']:.2f}, {result['position']['y']:.2f}, {depth_value:.2f})")
-            print(f"   Confidence: {result['position']['confidence']:.2%}")
+            logger.info("📊 RESULTS:")
+            logger.info(f"   Q: {result['transcription']}")
+            logger.info(f"   A: {result['answer']}")
+            logger.info(f"   Object: {result['object']}")
+            logger.info(f"   Position: ({result['position']['x']:.2f}, {result['position']['y']:.2f}, {depth_value:.2f})")
+            logger.info(f"   Confidence: {result['position']['confidence']:.2%}")
             
             # Broadcast to web clients
+            logger.info("Broadcasting to web clients...")
             self.server.broadcast_result(result)
+            logger.info("✅ Broadcast complete!")
             
             # Cleanup temp files
             os.unlink(audio_file)
             os.unlink(image_file.name)
             
         except Exception as e:
-            print(f"❌ Processing error: {e}")
+            logger.error(f"❌ Processing error: {e}")
             import traceback
-            traceback.print_exc()
+            logger.error(traceback.print_exc())
     
     def run(self):
         """Run the main application"""
         # Start web server in separate thread
+        logger.info("Starting web server thread...")
         server_thread = threading.Thread(target=self.server.run, daemon=True)
         server_thread.start()
         
-        print(f"\n🌐 Web interface: http://localhost:{Config.SERVER_PORT}")
-        print("   (or http://<jetson-ip>:5000 from tablet)\n")
+        # Wait a bit for server to start
+        time.sleep(2)
+        
+        logger.info(f"\n🌐 Web interface: http://localhost:{Config.SERVER_PORT}")
+        logger.info("   (or http://<jetson-ip>:5000 from tablet)\n")
         
         if self.test_mode:
-            print("🧪 TEST MODE ENABLED")
-            print("Press 't' to test, 'q' to quit\n")
+            logger.info("🧪 TEST MODE ENABLED")
+            logger.info("Press 't' to test, 'q' to quit\n")
         else:
-            print("Press SPACE to record, 'q' to quit\n")
+            logger.info("Press SPACE to record, 'q' to quit\n")
         
         try:
+            logger.info("Entering main loop...")
+            frame_count = 0
+            
             while True:
                 # Display live feed in window for debugging
                 frame_left, frame_right, _ = self.camera.get_frames()
                 
                 if frame_left is not None:
+                    frame_count += 1
+                    
                     # Show stereo view
                     stereo_view = cv2.hconcat([frame_left, frame_right])
+                    
+                    # Add frame counter
+                    cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 30),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    
                     cv2.imshow('AURA AI - Stereo Camera', stereo_view)
                 
                 key = cv2.waitKey(1) & 0xFF
                 
                 if key == ord('t') and self.test_mode:
-                    # Test mode: send hardcoded query
+                    logger.info("🧪 't' key pressed - starting test query")
                     self.process_test_query()
                 
                 elif key == ord(' ') and not self.test_mode:
-                    # Normal mode: record audio
                     if not self.recording:
+                        logger.info("SPACE pressed - starting recording")
                         self.process_query()
                     else:
+                        logger.info("SPACE released - stopping recording")
                         self.stop_query()
                 
                 elif key == ord('q'):
-                    print("\n👋 Shutting down...")
+                    logger.info("'q' pressed - shutting down")
                     break
                 
                 time.sleep(0.01)
         
         except KeyboardInterrupt:
-            print("\n👋 Interrupted, shutting down...")
+            logger.info("\n👋 Interrupted, shutting down...")
         
         finally:
             self.cleanup()
     
     def cleanup(self):
         """Cleanup resources"""
+        logger.info("Cleaning up resources...")
         self.camera.stop()
         self.audio.cleanup()
         cv2.destroyAllWindows()
-        print("✅ Cleanup complete")
+        logger.info("✅ Cleanup complete")
 
 def main():
     """Main entry point"""
@@ -262,9 +310,9 @@ def main():
         app = AURAGlasses(test_mode=args.test)
         app.run()
     except Exception as e:
-        print(f"❌ Fatal error: {e}")
+        logger.error(f"❌ Fatal error: {e}")
         import traceback
-        traceback.print_exc()
+        logger.error(traceback.print_exc())
         sys.exit(1)
 
 if __name__ == "__main__":

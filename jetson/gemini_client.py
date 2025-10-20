@@ -1,17 +1,21 @@
 import google.generativeai as genai
 import json
 import time
+import logging
 from PIL import Image
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 class GeminiClient:
     def __init__(self):
         if not Config.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY not found in .env file")
         
+        logger.info("Configuring Gemini API...")
         genai.configure(api_key=Config.GEMINI_API_KEY)
         self.model = genai.GenerativeModel(Config.GEMINI_MODEL)
-        print(f"✅ Gemini initialized: {Config.GEMINI_MODEL}")
+        logger.info(f"✅ Gemini initialized: {Config.GEMINI_MODEL}")
     
     def process_multimodal_query(self, image_path, audio_path=None, text_query=None):
         """
@@ -31,40 +35,54 @@ class GeminiClient:
         """
         for attempt in range(Config.GEMINI_MAX_RETRIES):
             try:
-                print(f"🔄 Gemini API call (attempt {attempt + 1}/{Config.GEMINI_MAX_RETRIES})")
+                logger.info(f"🔄 Gemini API call (attempt {attempt + 1}/{Config.GEMINI_MAX_RETRIES})")
                 
                 # Load image
+                logger.info(f"Loading image: {image_path}")
                 image = Image.open(image_path)
+                logger.info(f"Image loaded: {image.size}, mode: {image.mode}")
                 
-                # Construct prompt with strict JSON format
+                # Construct prompt
+                logger.info("Building prompt...")
                 prompt = self._build_prompt(text_query, audio_path is not None)
                 
                 # Build content list
                 content = [prompt, image]
                 
-                # Add audio if provided (Gemini 1.5 Pro supports audio)
+                # Add audio if provided
                 if audio_path:
+                    logger.info(f"Loading audio: {audio_path}")
                     with open(audio_path, 'rb') as f:
                         audio_data = f.read()
+                    logger.info(f"Audio loaded: {len(audio_data)} bytes")
                     content.append({
                         "mime_type": "audio/wav",
                         "data": audio_data
                     })
                 
                 # Make API call
+                logger.info("Sending request to Gemini...")
+                start_time = time.time()
+                
                 response = self.model.generate_content(content)
                 
+                elapsed = time.time() - start_time
+                logger.info(f"✅ Gemini responded in {elapsed:.2f}s")
+                
                 # Parse response
+                logger.info("Parsing JSON response...")
                 result = self._parse_response(response.text)
                 
-                print(f"✅ Gemini response: {json.dumps(result, indent=2)}")
+                logger.info(f"✅ Parsed result: {json.dumps(result, indent=2)}")
                 return result
                 
             except Exception as e:
-                print(f"❌ Gemini error (attempt {attempt + 1}): {e}")
+                logger.error(f"❌ Gemini error (attempt {attempt + 1}): {e}")
                 if attempt < Config.GEMINI_MAX_RETRIES - 1:
+                    logger.info(f"Retrying in {Config.GEMINI_RETRY_DELAY} seconds...")
                     time.sleep(Config.GEMINI_RETRY_DELAY)
                 else:
+                    logger.error("All retry attempts failed")
                     return self._fallback_response()
         
         return self._fallback_response()
@@ -150,11 +168,11 @@ User asks: "What color is this laptop?"
             return result
             
         except json.JSONDecodeError as e:
-            print(f"❌ JSON parse error: {e}")
-            print(f"Raw response: {response_text[:200]}")
+            logger.error(f"❌ JSON parse error: {e}")
+            logger.error(f"Raw response: {response_text[:200]}")
             raise
         except Exception as e:
-            print(f"❌ Response validation error: {e}")
+            logger.error(f"❌ Response validation error: {e}")
             raise
     
     def _fallback_response(self):

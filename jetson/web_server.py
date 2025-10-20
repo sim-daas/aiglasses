@@ -4,7 +4,10 @@ from flask_cors import CORS
 import cv2
 import json
 import os
+import logging
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 class WebServer:
     def __init__(self, camera_manager):
@@ -12,16 +15,16 @@ class WebServer:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         web_dir = os.path.join(os.path.dirname(current_dir), 'web')
         
-        print(f"📁 Web directory: {web_dir}")
-        print(f"📄 Looking for index.html at: {os.path.join(web_dir, 'index.html')}")
+        logger.info(f"📁 Web directory: {web_dir}")
+        logger.info(f"📄 Looking for index.html at: {os.path.join(web_dir, 'index.html')}")
         
         # Check if web directory and files exist
         if not os.path.exists(web_dir):
-            print(f"⚠️  Creating web directory: {web_dir}")
+            logger.warning(f"⚠️  Creating web directory: {web_dir}")
             os.makedirs(web_dir, exist_ok=True)
         
         if not os.path.exists(os.path.join(web_dir, 'index.html')):
-            print(f"⚠️  index.html not found, creating minimal version...")
+            logger.warning(f"⚠️  index.html not found, creating minimal version...")
             self._create_minimal_html(web_dir)
         
         self.app = Flask(__name__, 
@@ -35,8 +38,13 @@ class WebServer:
         self.camera_manager = camera_manager
         self.latest_result = None
         
+        logger.info("Setting up Flask routes...")
         self._setup_routes()
+        
+        logger.info("Setting up WebSocket handlers...")
         self._setup_socketio()
+        
+        logger.info("✅ Web server initialized")
     
     def _create_minimal_html(self, web_dir):
         """Create a minimal HTML file for testing"""
@@ -151,7 +159,7 @@ class WebServer:
         with open(os.path.join(web_dir, 'index.html'), 'w') as f:
             f.write(html_content)
         
-        print(f"✅ Created minimal index.html")
+        logger.info(f"✅ Created minimal index.html")
         
     def _setup_routes(self):
         """Setup Flask routes"""
@@ -192,26 +200,38 @@ class WebServer:
         
         @self.socketio.on('connect')
         def handle_connect():
-            print('🔌 Client connected')
+            logger.info('🔌 Client connected')
             emit('status', {'message': 'Connected to AURA AI'})
         
         @self.socketio.on('disconnect')
         def handle_disconnect():
-            print('🔌 Client disconnected')
+            logger.info('🔌 Client disconnected')
     
     def broadcast_result(self, result):
         """Broadcast result to all connected clients"""
+        logger.info(f"📡 Broadcasting result to web clients...")
+        logger.info(f"   Answer: {result['answer']}")
+        logger.info(f"   Object: {result['object']}")
+        
         self.latest_result = result
         self.socketio.emit('gemini_result', result)
-        print(f"📡 Broadcast result: {result['answer']}")
+        
+        logger.info("✅ Broadcast complete")
     
     def run(self):
         """Run the Flask server"""
-        print(f"🌐 Starting web server on http://{Config.SERVER_HOST}:{Config.SERVER_PORT}")
-        self.socketio.run(
-            self.app,
-            host=Config.SERVER_HOST,
-            port=Config.SERVER_PORT,
-            debug=False,
-            use_reloader=False
-        )
+        logger.info(f"🌐 Starting web server on http://{Config.SERVER_HOST}:{Config.SERVER_PORT}")
+        
+        try:
+            self.socketio.run(
+                self.app,
+                host=Config.SERVER_HOST,
+                port=Config.SERVER_PORT,
+                debug=False,
+                use_reloader=False,
+                allow_unsafe_werkzeug=True  # Suppress development server warning
+            )
+        except Exception as e:
+            logger.error(f"❌ Web server error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
