@@ -214,13 +214,17 @@ class AURAGlasses:
             logger.error(traceback.format_exc())
     
     def process_gesture_query(self, query_text):
-        """Process query from gesture keyboard"""
+        """Process query from gesture keyboard with 5-second delay"""
         logger.info("\n" + "="*50)
         logger.info(f"✋ Processing gesture query: '{query_text}'")
+        logger.info("⏳ Waiting 5 seconds before capturing frame...")
         logger.info("="*50)
         
+        # Wait 5 seconds before capturing
+        time.sleep(5.0)
+        
         try:
-            # Get current frame
+            # Get current frame AFTER 5 second delay
             frame_left, frame_right, depth_map = self.camera.get_frames()
             
             if frame_left is None:
@@ -231,7 +235,7 @@ class AURAGlasses:
             image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
             cv2.imwrite(image_file.name, frame_right)
             
-            logger.info("📸 Frame captured, sending to Gemini...")
+            logger.info("📸 Frame captured after 5s delay, sending to Gemini...")
             
             # Process with Gemini
             result = self.gemini.process_multimodal_query(

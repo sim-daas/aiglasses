@@ -224,6 +224,43 @@
                     transparent);
             z-index: 5;
         }
+
+        /* Test button */
+        #test-button {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 200, 0, 0.9);
+            padding: 20px 40px;
+            border-radius: 12px;
+            border: 2px solid #0f0;
+            color: #fff;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+            z-index: 200;
+            box-shadow: 0 4px 20px rgba(0, 255, 0, 0.5);
+            transition: all 0.3s;
+        }
+
+        #test-button:hover {
+            background: rgba(0, 255, 0, 1);
+            transform: translate(-50%, -50%) scale(1.05);
+        }
+
+        #test-button:active {
+            transform: translate(-50%, -50%) scale(0.95);
+        }
+
+        #test-button.hidden {
+            display: none;
+        }
+
+        #test-button.processing {
+            background: rgba(255, 150, 0, 0.9);
+            border-color: #fa0;
+        }
     </style>
 </head>
 
@@ -233,6 +270,9 @@
         <div class="feed-container" id="ar-container">
             <span class="feed-label">AR Visualization</span>
             <img id="feed" src="/video_feed" alt="AR Feed" />
+
+            <!-- Test Button -->
+            <button id="test-button">🧪 Test Gemini Query</button>
 
             <!-- Three.js canvas for 3D overlays -->
             <div id="cards"></div>
@@ -464,10 +504,57 @@
             status.className = 'status-disconnected';
         });
 
+        // Test button functionality
+        const testButton = document.getElementById('test-button');
+        testButton.addEventListener('click', async () => {
+            console.log('🧪 Test button clicked');
+
+            // Change button state
+            testButton.textContent = '⏳ Processing...';
+            testButton.classList.add('processing');
+            testButton.disabled = true;
+
+            try {
+                const response = await fetch('/test_query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: 'What objects do you see in this image? Describe their locations.'
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    console.log('✅ Test query successful:', data.result);
+                    // Hide button after 3 seconds
+                    setTimeout(() => {
+                        testButton.classList.add('hidden');
+                    }, 3000);
+                } else {
+                    console.error('❌ Test query failed:', data.error);
+                    alert('Test failed: ' + data.error);
+                }
+            } catch (error) {
+                console.error('❌ Test request error:', error);
+                alert('Test request failed: ' + error.message);
+            } finally {
+                // Reset button
+                testButton.textContent = '🧪 Test Gemini Query';
+                testButton.classList.remove('processing');
+                testButton.disabled = false;
+            }
+        });
+
         socket.on('gemini_result', (result) => {
             console.log('📡 ========== GEMINI RESULT RECEIVED ==========');
             console.log('Full result:', result);
             console.log('==============================================');
+
+            // Hide test button when result arrives
+            testButton.classList.add('hidden');
 
             // Update status text
             status.innerHTML =
