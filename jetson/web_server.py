@@ -1,4 +1,4 @@
-from flask import Flask, Response, jsonify, send_from_directory, request
+from flask import Flask, Response, jsonify, send_from_directory, request, render_template
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import cv2
@@ -528,7 +528,7 @@ class WebServer:
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame_left, 
                                           [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = buffer.tobytes()
+                frame_bytes = buffer.tobytes();
                 
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n');

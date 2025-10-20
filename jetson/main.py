@@ -56,6 +56,14 @@ class AURAGlasses:
         self.camera.initialize()
         self.camera.start()
         
+        # State - initialize BEFORE creating objects that depend on them
+        self.test_mode = test_mode
+        self.use_gesture_kb = use_gesture_kb
+        self.use_tape_measure = use_tape_measure
+        self.current_result = None
+        self.gesture_keyboard = None
+        self.tape_measure = None  # Will be set below if enabled
+        
         # Initialize tape measure if requested
         if use_tape_measure:
             logger.info("Initializing AR tape measure...")
@@ -68,15 +76,7 @@ class AURAGlasses:
         
         # Initialize web server with tape measure reference
         logger.info("Initializing web server...")
-        self.server = WebServer(self.camera, self.tape_measure if use_tape_measure else None)
-        
-        # State
-        self.test_mode = test_mode
-        self.use_gesture_kb = use_gesture_kb
-        self.use_tape_measure = use_tape_measure
-        self.current_result = None
-        self.gesture_keyboard = None
-        self.tape_measure = None
+        self.server = WebServer(self.camera, self.tape_measure)
         
         # Initialize 3D text renderer
         logger.info("Initializing 3D text renderer...")
