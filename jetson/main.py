@@ -12,14 +12,6 @@ import os
 import cv2
 import logging
 
-# Add GPIO support
-try:
-    import RPi.GPIO as GPIO
-    GPIO_AVAILABLE = True
-except ImportError:
-    GPIO_AVAILABLE = False
-    logger.warning("⚠️  RPi.GPIO not available, using keyboard only")
-
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -28,28 +20,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Suppress ALSA warnings
+# Suppress warnings
 os.environ['ALSA_CARD'] = 'default'
 import warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 from camera_manager import StereoCamera
-from audio_manager import AudioManager
 from gemini_client import GeminiClient
 from web_server import WebServer
 from config import Config
-from text_3d_renderer import Text3DRenderer  # Use PIL-based renderer
+from text_3d_renderer import Text3DRenderer
+
+# Conditional imports
+try:
+    from gesture_keyboard import GestureKeyboard
+    GESTURE_KB_AVAILABLE = True
+except ImportError:
+    GESTURE_KB_AVAILABLE = False
+    logger.warning("⚠️  Gesture keyboard not available")
+
+try:
+    import RPi.GPIO as GPIO
+    GPIO_AVAILABLE = True
+except ImportError:
+    GPIO_AVAILABLE = False
 
 class AURAGlasses:
-    def __init__(self, test_mode=False):
+    def __init__(self, test_mode=False, use_gesture_kb=False):
         logger.info("🚀 Initializing AURA AI Glasses...")
         
         # Initialize components
         logger.info("Initializing camera manager...")
         self.camera = StereoCamera()
-        
-        logger.info("Initializing audio manager...")
-        self.audio = AudioManager()
         
         logger.info("Initializing Gemini client...")
         self.gemini = GeminiClient()
@@ -64,63 +66,33 @@ class AURAGlasses:
         self.server = WebServer(self.camera)
         
         # State
-        self.recording = False
         self.test_mode = test_mode
-        self.current_result = None  # Store latest result for overlay
+        self.use_gesture_kb = use_gesture_kb
+        self.current_result = None
+        self.gesture_keyboard = None
         
-        # Initialize PIL-based 3D text renderer with depth-aware scaling
+        # Initialize 3D text renderer
         logger.info("Initializing 3D text renderer...")
         self.text_renderer = Text3DRenderer()
         
-        # Setup GPIO button (if available)
-        self.gpio_button_pin = 17  # GPIO pin 17 (physical pin 11)
-        if GPIO_AVAILABLE and not test_mode:
-            self._setup_gpio_button()
+        # Initialize gesture keyboard if requested
+        if use_gesture_kb and GESTURE_KB_AVAILABLE:
+            logger.info("Initializing gesture keyboard...")
+            self.gesture_keyboard = GestureKeyboard()
         
         logger.info("✅ AURA AI Glasses initialized!")
-        
-        if not test_mode:
-            logger.info("🎤 Audio devices:")
-            self.audio.list_devices()
         
         logger.info("\n📝 Instructions:")
         logger.info("   - Open browser to http://<jetson-ip>:5000")
         if test_mode:
             logger.info("   - Press 't' to send TEST query")
-        else:
-            logger.info("   - Press SPACE to start/stop recording")
+        elif use_gesture_kb:
+            logger.info("   - Use hand gestures to type query")
+            logger.info("   - Pinch + move = select letter")
+            logger.info("   - Two fingers = space")
+            logger.info("   - Open palm (hold) = backspace")
+            logger.info("   - Three fingers (hold) = submit")
         logger.info("   - Press Q to quit\n")
-    
-    def _setup_gpio_button(self):
-        """Setup GPIO button for push-to-talk"""
-        try:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.gpio_button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            
-            # Add event detection for button press/release
-            GPIO.add_event_detect(
-                self.gpio_button_pin,
-                GPIO.BOTH,
-                callback=self._gpio_button_callback,
-                bouncetime=200
-            )
-            
-            logger.info(f"🔘 GPIO button enabled on pin {self.gpio_button_pin}")
-        except Exception as e:
-            logger.error(f"❌ GPIO setup failed: {e}")
-    
-    def _gpio_button_callback(self, channel):
-        """Callback for GPIO button press/release"""
-        if GPIO.input(channel) == GPIO.LOW:
-            # Button pressed (pulled to ground)
-            if not self.recording and not self.test_mode:
-                logger.info("🔘 Button PRESSED - starting recording")
-                self.process_query()
-        else:
-            # Button released (pulled high)
-            if self.recording:
-                logger.info("🔘 Button RELEASED - stopping recording")
-                self.stop_query()
     
     def process_test_query(self):
         """Process a hardcoded test query without audio"""
@@ -145,7 +117,7 @@ class AURAGlasses:
             cv2.imwrite(image_file.name, frame_right)
             logger.info(f"✅ Frame saved to: {image_file.name}")
             
-            # Hardcoded test query - CHANGED
+            # Hardcoded test query
             test_query = "What is the screen size of the monitor?"
             logger.info(f"Step 3/6: Using test query: '{test_query}'")
             
@@ -182,50 +154,24 @@ class AURAGlasses:
             logger.info(f"   Confidence: {result['position']['confidence']:.2%}")
             
             # Broadcast to web clients
-            logger.info("Broadcasting to web clients...")
             self.server.broadcast_result(result)
-            
-            # Store result for overlay
             self.current_result = result
             
-            logger.info("✅ Broadcast complete!")
-            
-            # Cleanup temp files
-            os.unlink(image_file.name)
             logger.info("✅ Test query processing complete!")
+            
+            # Cleanup
+            os.unlink(image_file.name)
             
         except Exception as e:
             logger.error(f"❌ Processing error: {e}")
             import traceback
             logger.error(traceback.format_exc())
     
-    def process_query(self):
-        """Process user voice query with Gemini"""
+    def process_gesture_query(self, query_text):
+        """Process query from gesture keyboard"""
         logger.info("\n" + "="*50)
-        logger.info("🎤 Recording... (release to process)")
-        
-        # Start audio recording
-        if not self.audio.start_recording():
-            logger.error("❌ Failed to start recording")
-            return
-        
-        self.recording = True
-        
-    def stop_query(self):
-        """Stop recording and process"""
-        if not self.recording:
-            return
-        
-        self.recording = False
-        
-        logger.info("⏹️  Recording stopped, processing...")
-        
-        # Stop recording and get audio file
-        audio_file = self.audio.stop_recording()
-        
-        if not audio_file:
-            logger.error("❌ No audio recorded")
-            return
+        logger.info(f"✋ Processing gesture query: '{query_text}'")
+        logger.info("="*50)
         
         try:
             # Get current frame
@@ -237,19 +183,19 @@ class AURAGlasses:
             
             # Save frame to temporary file
             image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
-            cv2.imwrite(image_file.name, frame_right)  # Use right camera
+            cv2.imwrite(image_file.name, frame_right)
             
             logger.info("📸 Frame captured, sending to Gemini...")
             
             # Process with Gemini
             result = self.gemini.process_multimodal_query(
                 image_path=image_file.name,
-                audio_path=audio_file
+                text_query=query_text
             )
             
             # Add depth information
-            pos_x = int(result['position']['x'] * Config.CAMERA_WIDTH)
-            pos_y = int(result['position']['y'] * Config.CAMERA_HEIGHT)
+            pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
+            pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
             depth_value = self.camera.get_depth_at_point(pos_x, pos_y)
             
             result['position']['z'] = depth_value
@@ -261,21 +207,23 @@ class AURAGlasses:
             logger.info(f"   A: {result['answer']}")
             logger.info(f"   Object: {result['object']}")
             logger.info(f"   Position: ({result['position']['x']:.2f}, {result['position']['y']:.2f}, {depth_value:.2f})")
-            logger.info(f"   Confidence: {result['position']['confidence']:.2%}")
             
             # Broadcast to web clients
-            logger.info("Broadcasting to web clients...")
             self.server.broadcast_result(result)
-            logger.info("✅ Broadcast complete!")
+            self.current_result = result
             
-            # Cleanup temp files
-            os.unlink(audio_file)
+            # Reset gesture keyboard
+            if self.gesture_keyboard:
+                self.gesture_keyboard.reset_text()
+            
+            # Cleanup
             os.unlink(image_file.name)
+            logger.info("✅ Gesture query processing complete!")
             
         except Exception as e:
             logger.error(f"❌ Processing error: {e}")
             import traceback
-            logger.error(traceback.print_exc())
+            logger.error(traceback.format_exc())
     
     def _map_location_to_position(self, location, frame_width, frame_height):
         """Map Gemini's text location to pixel coordinates"""
@@ -298,185 +246,103 @@ class AURAGlasses:
             return frame
         
         h, w = frame.shape[:2]
-        
-        # Get location from Gemini (text-based: "center", "top-right", etc.)
         location = result.get('location', 'center')
-        
-        # Convert location to pixel coordinates
         pixel_x, pixel_y = self._map_location_to_position(location, w, h)
-        
-        # Get depth from stereo (normalized 0-1, where 0=close, 1=far)
         depth_normalized = result.get('position', {}).get('z', 0.5)
+        z_depth = 20.0 - (depth_normalized * 15.0)
         
-        # Calculate z_depth for perspective scaling
-        # Close objects (depth ~0) = larger text (z_depth ~20)
-        # Far objects (depth ~1) = smaller text (z_depth ~5)
-        z_depth = 20.0 - (depth_normalized * 15.0)  # Range: 5 to 20
-        
-        # Get text content
         answer = result['answer']
         object_name = result['object']
         
-        logger.info(f"📍 Rendering 3D text:")
-        logger.info(f"   Location: '{location}' -> ({pixel_x}, {pixel_y})")
-        logger.info(f"   Depth: {depth_normalized:.3f} -> z_depth: {z_depth:.2f}")
-        logger.info(f"   Frame: {w}x{h}")
-        logger.info(f"   Text: '{answer[:50]}{'...' if len(answer) > 50 else ''}'")
-        
-        # Render main answer with 3D effect
+        # Render main answer
         frame = self.text_renderer.render_3d_text(
-            frame,
-            answer,
-            (pixel_x, pixel_y),
-            z_depth=z_depth
+            frame, answer, (pixel_x, pixel_y), z_depth=z_depth
         )
         
-        # Render object label below (smaller, different position)
-        label_offset = int(h * 0.08)  # 8% of frame height
-        label_y = min(pixel_y + label_offset, h - 50)  # Keep within bounds
+        # Render label
+        label_offset = int(h * 0.08)
+        label_y = min(pixel_y + label_offset, h - 50)
         frame = self.text_renderer.render_3d_text(
-            frame,
-            f"[{object_name}]",
-            (pixel_x, label_y),
-            z_depth=z_depth * 0.5  # Smaller label
+            frame, f"[{object_name}]", (pixel_x, label_y), z_depth=z_depth * 0.5
         )
         
-        # Draw positioning indicator (crosshair at center)
-        indicator_size = max(3, int(w / 200))
-        indicator_color = (0, 255, 0)
-        
-        # Crosshair
-        cv2.line(frame, 
-                (pixel_x - 10, pixel_y), (pixel_x + 10, pixel_y),
-                indicator_color, 2)
-        cv2.line(frame,
-                (pixel_x, pixel_y - 10), (pixel_x, pixel_y + 10),
-                indicator_color, 2)
-        cv2.circle(frame, (pixel_x, pixel_y), 8, indicator_color, 2)
-        
-        # Draw depth indicator bar (horizontal bar showing distance)
-        bar_width = int(w * 0.12)  # 12% of frame width
-        bar_height = 6
-        bar_x = pixel_x - bar_width // 2
-        bar_y = pixel_y - int(h * 0.05)  # Above crosshair
-        
-        # Background bar
-        cv2.rectangle(frame,
-                     (bar_x, bar_y),
-                     (bar_x + bar_width, bar_y + bar_height),
-                     (50, 50, 50), -1)
-        
-        # Filled portion (inversely proportional to depth)
-        filled_width = int(bar_width * (1.0 - depth_normalized))
-        color = (0, int(255 * (1.0 - depth_normalized)), int(255 * depth_normalized))
-        cv2.rectangle(frame,
-                     (bar_x, bar_y),
-                     (bar_x + filled_width, bar_y + bar_height),
-                     color, -1)
-        
-        # Depth text
-        depth_text = f"{depth_normalized:.2f}m"
-        cv2.putText(frame, depth_text,
-                   (bar_x, bar_y - 8),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+        # Draw indicators
+        cv2.line(frame, (pixel_x - 10, pixel_y), (pixel_x + 10, pixel_y), (0, 255, 0), 2)
+        cv2.line(frame, (pixel_x, pixel_y - 10), (pixel_x, pixel_y + 10), (0, 255, 0), 2)
+        cv2.circle(frame, (pixel_x, pixel_y), 8, (0, 255, 0), 2)
         
         return frame
     
     def run(self):
         """Run the main application"""
-        # Start web server in separate thread
+        # Start web server
         logger.info("Starting web server thread...")
         server_thread = threading.Thread(target=self.server.run, daemon=True)
         server_thread.start()
-        
-        # Wait a bit for server to start
         time.sleep(2)
         
-        logger.info(f"\n🌐 Web interface: http://localhost:{Config.SERVER_PORT}")
-        logger.info("   (or http://<jetson-ip>:5000 from tablet)\n")
+        logger.info(f"\n🌐 Web interface: http://localhost:{Config.SERVER_PORT}\n")
         
         if self.test_mode:
             logger.info("🧪 TEST MODE ENABLED")
             logger.info("Press 't' to test, 'q' to quit\n")
-        else:
-            if GPIO_AVAILABLE:
-                logger.info("🔘 Push-to-talk: Physical button on GPIO pin 17")
-            logger.info("⌨️  Keyboard: Press SPACE to record, 'q' to quit\n")
+        elif self.use_gesture_kb:
+            logger.info("✋ GESTURE KEYBOARD MODE")
+            logger.info("Use hand gestures to type, 'q' to quit\n")
         
         try:
-            logger.info("Entering main loop...")
             frame_count = 0
             
             while True:
-                # Display live feed in window for debugging
+                # Get frames
                 frame_left, frame_right, _ = self.camera.get_frames()
                 
                 if frame_left is not None:
                     frame_count += 1
-                    
-                    # Create copies for overlay
                     display_left = frame_left.copy()
                     display_right = frame_right.copy()
+                    
+                    # Process gesture keyboard if enabled
+                    if self.use_gesture_kb and self.gesture_keyboard:
+                        display_left, status, should_submit = self.gesture_keyboard.process_frame(display_left)
+                        
+                        if should_submit:
+                            query = self.gesture_keyboard.get_text().strip()
+                            if query:
+                                self.process_gesture_query(query)
                     
                     # Add 3D text overlay if we have results
                     if self.current_result:
                         display_left = self._draw_3d_text_overlay(display_left, self.current_result)
                         display_right = self._draw_3d_text_overlay(display_right, self.current_result)
                     
-                    # Show stereo view with overlays
+                    # Show stereo view
                     stereo_view = cv2.hconcat([display_left, display_right])
-                    
-                    # Add frame counter
                     cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    
                     cv2.imshow('AURA AI - Stereo Camera', stereo_view)
                 
                 key = cv2.waitKey(1) & 0xFF
                 
                 if key == ord('t') and self.test_mode:
-                    logger.info("🧪 't' key pressed - starting test query")
                     self.process_test_query()
-                
-                elif key == ord(' ') and not self.test_mode:
-                    if not self.recording:
-                        logger.info("SPACE pressed - starting recording")
-                        self.process_query()
-                    else:
-                        logger.info("SPACE released - stopping recording")
-                        self.stop_query()
-                
                 elif key == ord('q'):
                     logger.info("'q' pressed - shutting down")
                     break
-                
-                elif key == ord('b') and self.test_mode:
-                    # Broadcast test message
-                    logger.info("'b' pressed - broadcasting test message")
-                    self.server.test_broadcast()
                 
                 time.sleep(0.01)
         
         except KeyboardInterrupt:
             logger.info("\n👋 Interrupted, shutting down...")
-        
         finally:
             self.cleanup()
     
     def cleanup(self):
         """Cleanup resources"""
         logger.info("Cleaning up resources...")
-        
-        # Cleanup GPIO
-        if GPIO_AVAILABLE:
-            try:
-                GPIO.cleanup()
-                logger.info("✅ GPIO cleaned up")
-            except:
-                pass
-        
         self.camera.stop()
-        self.audio.cleanup()
+        if self.gesture_keyboard:
+            self.gesture_keyboard.cleanup()
         cv2.destroyAllWindows()
         logger.info("✅ Cleanup complete")
 
@@ -486,17 +352,19 @@ def main():
     
     parser = argparse.ArgumentParser(description="AURA AI Glasses")
     parser.add_argument('--test', action='store_true',
-                       help='Enable test mode (hardcoded queries, no audio)')
+                       help='Enable test mode (hardcoded queries)')
+    parser.add_argument('--gesture', action='store_true',
+                       help='Enable gesture keyboard mode')
     
     args = parser.parse_args()
     
     try:
-        app = AURAGlasses(test_mode=args.test)
+        app = AURAGlasses(test_mode=args.test, use_gesture_kb=args.gesture)
         app.run()
     except Exception as e:
         logger.error(f"❌ Fatal error: {e}")
         import traceback
-        logger.error(traceback.print_exc())
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 if __name__ == "__main__":

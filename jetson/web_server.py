@@ -113,57 +113,6 @@ class WebServer:
             pointer-events: none;
             z-index: 2;
         }
-        #query-panel {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.9);
-            padding: 20px;
-            border-radius: 10px;
-            z-index: 100;
-            min-width: 500px;
-            border: 2px solid #0f0;
-        }
-        #query-input {
-            width: 100%;
-            padding: 12px;
-            font-size: 16px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid #0f0;
-            border-radius: 5px;
-            color: #fff;
-            margin-bottom: 10px;
-        }
-        #query-input:focus {
-            outline: none;
-            border-color: #0ff;
-            background: rgba(255, 255, 255, 0.15);
-        }
-        #ask-button {
-            width: 100%;
-            padding: 12px;
-            font-size: 16px;
-            background: #0f0;
-            border: none;
-            border-radius: 5px;
-            color: #000;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        #ask-button:hover {
-            background: #0ff;
-            transform: scale(1.02);
-        }
-        #ask-button:active {
-            transform: scale(0.98);
-        }
-        #ask-button:disabled {
-            background: #555;
-            cursor: not-allowed;
-            transform: none;
-        }
         #status {
             position: absolute;
             top: 20px;
@@ -178,7 +127,7 @@ class WebServer:
         }
         #info {
             position: absolute;
-            top: 20px;
+            bottom: 20px;
             left: 20px;
             background: rgba(0, 0, 0, 0.9);
             padding: 10px 15px;
@@ -188,6 +137,20 @@ class WebServer:
             z-index: 100;
             border: 1px solid #333;
         }
+        #debug {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-family: monospace;
+            color: #0f0;
+            z-index: 100;
+            max-width: 300px;
+            border: 1px solid #0f0;
+        }
     </style>
 </head>
 <body>
@@ -195,9 +158,9 @@ class WebServer:
         <img id="video-feed" src="/video_feed" alt="Camera Feed">
         <canvas id="three-canvas"></canvas>
         
-        <div id="query-panel">
-            <input type="text" id="query-input" placeholder="Type your question here..." />
-            <button id="ask-button">Ask Gemini</button>
+        <div id="debug">
+            <div>Three.js Status: <span id="threejs-status">Initializing...</span></div>
+            <div>Last Event: <span id="last-event">None</span></div>
         </div>
         
         <div id="status">
@@ -205,7 +168,7 @@ class WebServer:
         </div>
         
         <div id="info">
-            <p>💬 Type a question and click "Ask Gemini"</p>
+            <p>📝 Press 't' on Jetson to test</p>
             <p>🎥 3D text powered by Three.js</p>
         </div>
     </div>
@@ -216,6 +179,11 @@ class WebServer:
         // Three.js setup
         let scene, camera, renderer;
         let textMesh = null;
+        
+        function updateDebug(status, event) {
+            document.getElementById('threejs-status').textContent = status;
+            document.getElementById('last-event').textContent = event;
+        }
         
         function initThree() {
             console.log('🎨 Initializing Three.js...');
@@ -247,8 +215,10 @@ class WebServer:
                 animate();
                 
                 console.log('✅ Three.js initialized successfully');
+                updateDebug('Ready', 'Initialized');
             } catch (error) {
                 console.error('❌ Three.js initialization failed:', error);
+                updateDebug('Failed', error.message);
             }
         }
         
@@ -266,6 +236,7 @@ class WebServer:
         
         function create3DText(result) {
             console.log('🎨 Creating 3D text from result:', result);
+            updateDebug('Creating text...', JSON.stringify(result.object));
             
             try {
                 // Remove old text
@@ -273,11 +244,14 @@ class WebServer:
                     scene.remove(textMesh);
                     textMesh.geometry.dispose();
                     textMesh.material.dispose();
+                    console.log('🗑️ Removed old text mesh');
                 }
                 
                 const text = result.answer || 'No answer';
                 const label = result.object || 'unknown';
                 const location = result.location || 'center';
+                
+                console.log(`Creating text: "${text}" at ${location}`);
                 
                 // Create text canvas
                 const canvas = document.createElement('canvas');
@@ -307,7 +281,9 @@ class WebServer:
                 }
                 lines.push(currentLine);
                 
-                // Render each line
+                console.log(`Text wrapped into ${lines.length} lines`);
+                
+                // Draw depth layers for 3D effect
                 const layerCount = 8;
                 let yPos = 350;
                 const lineHeight = 140;
@@ -350,6 +326,8 @@ class WebServer:
                 const labelText = `[${label}]`;
                 context.strokeText(labelText, 1024, yPos);
                 context.fillText(labelText, 1024, yPos);
+                
+                console.log('Canvas text drawn');
                 
                 // Create texture
                 const texture = new THREE.CanvasTexture(canvas);
@@ -395,13 +373,16 @@ class WebServer:
                 scene.add(textMesh);
                 
                 console.log(`✅ 3D text added to scene at position: [${pos[0]}, ${pos[1]}, ${zPos}]`);
+                updateDebug('Text visible!', `${location} @ z:${zPos.toFixed(2)}`);
                 
             } catch (error) {
                 console.error('❌ Error creating 3D text:', error);
+                updateDebug('Error!', error.message);
             }
         }
         
         // Socket.IO setup
+        console.log('🔌 Connecting to Socket.IO...');
         const socket = io(window.location.origin, {
             path: '/socket.io',
             transports: ['polling', 'websocket'],
@@ -413,12 +394,14 @@ class WebServer:
             console.log('✅ Socket.IO connected');
             document.getElementById('status-text').textContent = '✅ Connected';
             document.getElementById('status-text').style.color = '#0f0';
+            updateDebug('Connected', 'Socket.IO active');
         });
         
         socket.on('disconnect', (reason) => {
             console.log('❌ Socket.IO disconnected:', reason);
             document.getElementById('status-text').textContent = '❌ Disconnected: ' + reason;
             document.getElementById('status-text').style.color = '#f00';
+            updateDebug('Disconnected', reason);
         });
         
         socket.on('status', (data) => {
@@ -427,7 +410,13 @@ class WebServer:
         });
         
         socket.on('gemini_result', (result) => {
-            console.log('📡 Gemini result received:', result);
+            console.log('📡 ========== GEMINI RESULT RECEIVED ==========');
+            console.log('Full result object:', result);
+            console.log('Answer:', result.answer);
+            console.log('Object:', result.object);
+            console.log('Location:', result.location);
+            console.log('Position:', result.position);
+            console.log('==============================================');
             
             // Update status
             document.getElementById('status-text').innerHTML = 
@@ -437,11 +426,13 @@ class WebServer:
                 `<strong>Location:</strong> ${result.location}`;
             
             // Create 3D text
-            create3DText(result);
-            
-            // Re-enable button
-            document.getElementById('ask-button').disabled = false;
-            document.getElementById('ask-button').textContent = 'Ask Gemini';
+            try {
+                create3DText(result);
+                console.log('✅ 3D text creation completed');
+            } catch (error) {
+                console.error('❌ Fatal error creating 3D text:', error);
+                console.error('Stack trace:', error.stack);
+            }
             
             // Auto-hide after 15 seconds
             setTimeout(() => {
@@ -450,37 +441,10 @@ class WebServer:
                     textMesh.geometry.dispose();
                     textMesh.material.dispose();
                     textMesh = null;
+                    console.log('🗑️ 3D text removed after timeout');
+                    updateDebug('Ready', 'Text cleared');
                 }
             }, 15000);
-        });
-        
-        // Text query submission
-        document.getElementById('ask-button').addEventListener('click', () => {
-            const query = document.getElementById('query-input').value.trim();
-            if (!query) {
-                alert('Please enter a question!');
-                return;
-            }
-            
-            console.log('📤 Sending text query:', query);
-            
-            // Disable button
-            const button = document.getElementById('ask-button');
-            button.disabled = true;
-            button.textContent = 'Processing...';
-            
-            // Send to server
-            socket.emit('text_query', { query: query });
-            
-            // Update status
-            document.getElementById('status-text').textContent = `Processing: "${query}"...`;
-        });
-        
-        // Handle Enter key in input
-        document.getElementById('query-input').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                document.getElementById('ask-button').click();
-            }
         });
         
         // Handle window resize
@@ -488,12 +452,16 @@ class WebServer:
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            console.log('📐 Window resized');
         });
         
         // Initialize on load
         window.addEventListener('load', () => {
+            console.log('📄 Page loaded, initializing...');
             initThree();
         });
+        
+        console.log('✅ Script loaded and ready');
     </script>
 </body>
 </html>"""
@@ -501,7 +469,7 @@ class WebServer:
         with open(os.path.join(web_dir, 'index.html'), 'w') as f:
             f.write(html_content)
         
-        logger.info(f"✅ Created index.html with text input interface")
+        logger.info(f"✅ Created index.html with Three.js (all inline)")
     
     def _setup_routes(self):
         """Setup Flask routes"""
@@ -555,7 +523,7 @@ class WebServer:
         depth_normalized = result.get('position', {}).get('z', 0.5)
         
         # Convert depth to z_depth (inverse for proper scaling)
-        z_depth = 20.0 - (depth_normalized * 15.0);
+        z_depth = 20.0 - (depth_normalized * 15.0)
         
         # Render 3D text
         frame = self.text_renderer.render_3d_text(
@@ -563,21 +531,21 @@ class WebServer:
             answer,
             (x, y),
             z_depth=z_depth
-        );
+        )
         
         # Render object label
-        label_offset = int(h * 0.08);
-        label_y = min(y + label_offset, h - 50);
+        label_offset = int(h * 0.08)
+        label_y = min(y + label_offset, h - 50)
         frame = self.text_renderer.render_3d_text(
             frame,
             f"[{object_name}]",
             (x, label_y),
             z_depth=z_depth * 0.5
-        );
+        )
         
         # Location indicator
-        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1);
-        cv2.circle(frame, (x, y), 8, (255, 255, 255), 1);
+        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+        cv2.circle(frame, (x, y), 8, (255, 255, 255), 1)
         
         return frame
     
@@ -618,95 +586,10 @@ class WebServer:
         def handle_disconnect():
             logger.info('🔌 Client disconnected from SocketIO')
         
-        @self.socketio.on('text_query')
-        def handle_text_query(data):
-            """Handle text query from web interface"""
-            logger.info(f'📝 Received text query from web: {data}')
-            
-            query = data.get('query', '')
-            if not query:
-                emit('status', {'message': 'Empty query received'})
-                return
-            
-            logger.info(f'   Query: "{query}"')
-            
-            # Process query in background thread
-            thread = threading.Thread(
-                target=self._process_web_query,
-                args=(query,)
-            )
-            thread.daemon = True
-            thread.start()
-            
-            emit('status', {'message': f'Processing: {query}...'})
-        
         @self.socketio.on('ping')
         def handle_ping(data):
             logger.info(f'📡 Received ping: {data}')
             emit('pong', {'data': data})
-    
-    def _process_web_query(self, query):
-        """Process text query from web interface"""
-        try {
-            logger.info(f"🌐 Processing web query: {query}")
-            
-            # Get current frame
-            frame_left, frame_right, depth_map = self.camera_manager.get_frames()
-            
-            if frame_left is None:
-                logger.error("❌ No camera frame available")
-                self.socketio.emit('status', {'message': 'Error: No camera frame'})
-                return
-            
-            # Save frame to temp file
-            import tempfile
-            image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
-            cv2.imwrite(image_file.name, frame_right)
-            
-            # Import gemini client
-            from gemini_client import GeminiClient
-            from config import Config
-            
-            gemini = GeminiClient()
-            
-            # Process with Gemini
-            logger.info(f"📤 Sending to Gemini API...")
-            result = gemini.process_multimodal_query(
-                image_path=image_file.name,
-                text_query=query
-            )
-            
-            # Add depth information
-            pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
-            pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
-            
-            # Calculate depth from stereo
-            if depth_map is not None:
-                depth_value = depth_map[pos_y, pos_x] if 0 <= pos_y < depth_map.shape[0] and 0 <= pos_x < depth_map.shape[1] else 0.5
-            else:
-                depth_value = 0.5
-            
-            result['position']['z'] = depth_value
-            result['position']['depth_normalized'] = depth_value
-            
-            logger.info(f"✅ Web query processed successfully")
-            logger.info(f"   Answer: {result['answer']}")
-            logger.info(f"   Object: {result['object']}")
-            logger.info(f"   Location: {result.get('location', 'N/A')}")
-            
-            # Broadcast result
-            self.latest_result = result
-            self.socketio.emit('gemini_result', result)
-            
-            # Cleanup
-            os.unlink(image_file.name)
-            
-        } except Exception as e {
-            logger.error(f"❌ Web query processing error: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            self.socketio.emit('status', {'message': f'Error: {str(e)}'})
-        }
     
     def broadcast_result(self, result):
         """Broadcast result to all connected clients"""

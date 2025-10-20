@@ -15,11 +15,11 @@ class Text3DRenderer:
     def get_default_params():
         """Default parameters matching detect.py and 3dtext.py"""
         return {
-            "font_size": 32,
-            "scale_factor": 80.0,
+            "font_size": 32,  # Reduced from 48 for better fit
+            "scale_factor": 80.0,  # Reduced from 100.0
             "shadow_offset_x": 5,
             "shadow_offset_y": 5,
-            "shadow_blur": 0,  # DISABLED for sharper text
+            "shadow_blur": 3,
             "shadow_opacity": 0.6,
             "text_color_r": 0,
             "text_color_g": 255,
@@ -34,9 +34,8 @@ class Text3DRenderer:
             "enable_depth": True,
             "enable_outline": True,
             "auto_shadow_direction": True,
-            "max_text_width_ratio": 0.6,
-            "max_chars_per_line": 40,
-            "antialiasing": True  # Enable PIL antialiasing
+            "max_text_width_ratio": 0.6,  # Text takes max 60% of frame width
+            "max_chars_per_line": 40  # Maximum characters per line
         }
     
     def calculate_auto_shadow_direction(self, text_x, text_y, image_width, image_height, z_depth):
@@ -132,15 +131,11 @@ class Text3DRenderer:
         max_size = max(60, int(img_width / 15))  # Maximum before too large
         final_font_size = max(min_size, min(max_size, final_font_size))
         
-        # Load font with better quality
+        # Load font
         try:
             font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", final_font_size)
         except:
-            try:
-                # Try alternative font
-                font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", final_font_size)
-            except:
-                font = ImageFont.load_default()
+            font = ImageFont.load_default()
         
         # Calculate max text width based on frame size
         max_text_width_ratio = self.params.get('max_text_width_ratio', 0.6)
@@ -241,23 +236,21 @@ class Text3DRenderer:
                         if dx != 0 or dy != 0:
                             draw.text((line_x + dx, current_y + dy), line, font=font, fill=outline_color)
             
-            # Draw main text with crisp rendering
+            # Draw main text
             draw.text((line_x, current_y), line, font=font, fill=text_color)
             
             current_y += line_height
-    
-        # REMOVE blur application for sharper text
-        # shadow_blur = self.params.get('shadow_blur', 0)
-        # if shadow_blur > 0:
-        #     overlay = overlay.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
         
-        # Convert back and blend with better quality
+        # Apply blur
+        shadow_blur = self.params.get('shadow_blur', 0)
+        if shadow_blur > 0:
+            overlay = overlay.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
+        
+        # Convert back and blend
         overlay_cv = cv2.cvtColor(np.array(overlay), cv2.COLOR_RGBA2BGRA)
         alpha = overlay_cv[:, :, 3] / 255.0
         alpha_3ch = np.dstack([alpha, alpha, alpha])
         overlay_bgr = overlay_cv[:, :, :3]
-        
-        # Use higher precision for blending
-        result = cv_image.astype(np.float32) * (1 - alpha_3ch) + overlay_bgr.astype(np.float32) * alpha_3ch
+        result = cv_image * (1 - alpha_3ch) + overlay_bgr * alpha_3ch
         
         return result.astype(np.uint8)
