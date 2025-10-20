@@ -40,13 +40,6 @@ except ImportError:
     GESTURE_KB_AVAILABLE = False
     logger.warning("⚠️  Gesture keyboard not available. Install with: pip install mediapipe")
 
-try:
-    from live_translator import LiveTranslator
-    TRANSLATOR_AVAILABLE = True
-except ImportError:
-    TRANSLATOR_AVAILABLE = False
-    logger.warning("⚠️  Live translator not available. Install: pip install easyocr langdetect deep-translator")
-
 class AURAGlasses:
     def __init__(self, test_mode=False, use_gesture_kb=False, use_tape_measure=False, headless=True):
         logger.info("🚀 Initializing AURA AI Glasses...")
@@ -71,8 +64,7 @@ class AURAGlasses:
         self.current_result = None
         self.gesture_keyboard = None
         self.tape_measure = None
-        self.translator = None
-        self.translation_results = []
+        self.translation_results = None  # Store Gemini translation result
         self.last_translate_time = 0
         self.submit_pending = False
         self.submit_time = 0
@@ -107,23 +99,6 @@ class AURAGlasses:
                 logger.error("❌ Gesture keyboard requested but MediaPipe not available!")
                 logger.error("   Install with: pip install mediapipe")
                 sys.exit(1)
-        
-        # Initialize translator if gesture keyboard is enabled
-        if use_gesture_kb and TRANSLATOR_AVAILABLE:
-            try:
-                logger.info("Initializing live translator...")
-                # Use basic language set to avoid compatibility issues
-                self.translator = LiveTranslator(
-                    target_lang='en',
-                    ocr_langs=['en', 'es', 'fr', 'de']  # Start with compatible languages
-                )
-            except Exception as e:
-                logger.warning(f"⚠️  Could not initialize translator: {e}")
-                logger.warning("    Translation feature will be disabled")
-                self.translator = None
-        elif use_gesture_kb and not TRANSLATOR_AVAILABLE:
-            logger.warning("⚠️  Translator libraries not available")
-            logger.warning("    Install with: pip install easyocr langdetect deep-translator")
         
         if not headless:
             logger.info("⚠️  Display mode enabled (requires X11/GTK)")
@@ -291,16 +266,11 @@ class AURAGlasses:
                         # Check for TRANSLATE button
                         current_time = time.time()
                         if 'Typed: TRANSLATE' in status and (current_time - self.last_translate_time) > 2.0:
-                            if self.translator:
-                                # Start translate countdown
-                                self.translate_pending = True
-                                self.translate_time = current_time
-                                self.last_translate_time = current_time
-                                logger.info("⏳ TRANSLATE pressed! Capturing in 5 seconds for OCR...")
-                            else:
-                                if (current_time - self.last_translate_time) > 10.0:
-                                    logger.warning("⚠️  Translator not initialized. Install: pip install easyocr langdetect deep-translator")
-                                self.last_translate_time = current_time
+                            # Start translate countdown (no OCR check needed)
+                            self.translate_pending = True
+                            self.translate_time = current_time
+                            self.last_translate_time = current_time
+                            logger.info("⏳ TRANSLATE pressed! Capturing in 5 seconds for OCR...")
                         elif should_submit:
                             # SUBMIT button pressed - start countdown
                             query = self.gesture_keyboard.get_text().strip()
@@ -389,15 +359,13 @@ class AURAGlasses:
                                            args=(frame_left, frame_right, depth_map),
                                            daemon=True).start()
                     
-                    # Draw translation overlay if available (not from countdown, from actual results)
-                    if self.translation_results and self.translator and not self.translate_pending:
-                        display_frame = self.translator.draw_overlay(display_frame, self.translation_results)
+                    # No OCR overlay drawing - translation results shown via web only
                     
-                    # Draw tape measure overlay
+                    # Draw tape measure overlay (not on keyboard feed)
                     if self.use_tape_measure and self.tape_measure:
                         display_frame = self.tape_measure.draw_overlay(display_frame)
                     
-                    # Store processed frame for web streaming
+                    # Store processed frame for web streaming (keyboard feed)
                     self.camera.set_processed_frame(display_frame)
                     
                     # Show single camera view (ONLY if not headless)
@@ -451,8 +419,8 @@ class AURAGlasses:
             self.cleanup()
     
     def _process_delayed_translation(self, frame_left, frame_right, depth_map):
-        """Process OCR translation in background thread (called after 5-second delay)"""
-        logger.info("📝 Processing delayed OCR translation...")
+        """Process translation using Gemini (no OCR library needed)"""
+        logger.info("📝 Processing Gemini-based translation...")
         
         try:
             if frame_left is None:
@@ -466,7 +434,7 @@ class AURAGlasses:
             logger.info("📸 Frame captured, sending to Gemini for translation...")
             
             # Create translation prompt
-            translation_query = "Please detect and translate all visible text in this image to English. For each text region, provide: 1) The original text, 2) The detected language, 3) The English translation, 4) The approximate location (top-left, center, etc). Format as a clear list."
+            translation_query = "Please detect and translate all visible text in this image to English. For each text region found, provide: 1) The original text, 2) The detected language, 3) The English translation, 4) The approximate location in the image (e.g., top-left, center-right, bottom-center). Format your response as a clear numbered list. If no text is found, say 'No text detected'."
             
             # Process with Gemini
             result = self.gemini.process_multimodal_query(
@@ -474,37 +442,28 @@ class AURAGlasses:
                 text_query=translation_query
             )
             
+            # Add depth information
+            pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
+            pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
+            depth_value = self.camera.get_depth_at_point(pos_x, pos_y)
+            
+            result['position']['z'] = depth_value
+            result['position']['depth_normalized'] = depth_value
+            
             logger.info("📊 TRANSLATION RESULTS:")
             logger.info(f"   Q: {result['transcription']}")
             logger.info(f"   A: {result['answer']}")
             
-            # Parse translation result and create overlay data
-            translation_data = {
-                'type': 'translation',
-                'answer': result['answer'],
-                'object': result.get('object', 'text'),
-                'location': result.get('location', 'center'),
-                'position': result.get('position', {'x': 0.5, 'y': 0.5, 'z': 0.5})
-            }
-            
             # Broadcast to web clients
-            self.server.broadcast_result(translation_data)
-            
-            # Store for local overlay (simplified format)
-            self.translation_results = [{
-                'text': result.get('answer', 'No text detected'),
-                'translated': result.get('answer', ''),
-                'bbox': [[100, 100], [500, 100], [500, 300], [100, 300]],
-                'center': [300, 200],
-                'confidence': 0.9
-            }]
+            self.server.broadcast_result(result)
+            self.translation_results = result
             
             # Cleanup
             os.unlink(image_file.name)
             logger.info("✅ Translation processing complete!")
             
-            # Clear translation results after 10 seconds
-            threading.Timer(10.0, self._clear_translation_results).start()
+            # Clear translation results after 15 seconds
+            threading.Timer(15.0, self._clear_translation_results).start()
             
         except Exception as e:
             logger.error(f"❌ Translation processing error: {e}")
@@ -513,7 +472,7 @@ class AURAGlasses:
     
     def _clear_translation_results(self):
         """Clear translation overlay after timeout"""
-        self.translation_results = []
+        self.translation_results = None
         logger.info("🗑️ Translation results cleared")
     
     def _process_delayed_query(self, query_text, frame_left, frame_right, depth_map):

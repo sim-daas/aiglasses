@@ -140,19 +140,37 @@ class DepthTapeMeasure:
         """
         overlay = frame.copy()
         
-        # Draw center crosshair with distance
-        cv2.circle(overlay, (self.cx, self.cy), 8, (0, 255, 255), 2)
-        cv2.line(overlay, (self.cx - 15, self.cy), (self.cx + 15, self.cy), (0, 255, 255), 2)
-        cv2.line(overlay, (self.cx, self.cy - 15), (self.cx, self.cy + 15), (0, 255, 255), 2)
+        # Draw center crosshair with distance (cleaner, top-left corner)
+        h, w = overlay.shape[:2]
         
-        # Center distance
+        # Distance display in top-left corner (not blocking keyboard)
         center_depth = self.get_depth_at_point(self.cx, self.cy, radius=12)
         if np.isfinite(center_depth):
-            dist_text = f"{center_depth * 100:.0f} cm"
-            cv2.putText(overlay, dist_text, (self.cx + 12, self.cy - 12),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (50, 255, 50), 2, cv2.LINE_AA)
+            dist_text = f"Distance: {center_depth * 100:.0f} cm"
+            
+            # Background box
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.7
+            thickness = 2
+            text_size = cv2.getTextSize(dist_text, font, font_scale, thickness)[0]
+            
+            padding = 10
+            box_x1 = 10
+            box_y1 = 10
+            box_x2 = 10 + text_size[0] + padding * 2
+            box_y2 = 10 + text_size[1] + padding * 2
+            
+            cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2),
+                         (0, 0, 0), -1)
+            cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2),
+                         (0, 255, 0), 2)
+            
+            # Text
+            cv2.putText(overlay, dist_text, 
+                       (box_x1 + padding, box_y1 + text_size[1] + padding),
+                       font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
         
-        # Draw measurement points
+        # Draw measurement points (if any)
         if self.point1 is not None:
             cv2.circle(overlay, self.point1, 6, (255, 200, 0), -1)
             cv2.circle(overlay, self.point1, 8, (255, 255, 255), 2)
