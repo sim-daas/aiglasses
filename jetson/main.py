@@ -12,6 +12,14 @@ import os
 import cv2
 import logging
 
+# Add GPIO support
+try:
+    import RPi.GPIO as GPIO
+    GPIO_AVAILABLE = True
+except ImportError:
+    GPIO_AVAILABLE = False
+    logger.warning("⚠️  RPi.GPIO not available, using keyboard only")
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +72,11 @@ class AURAGlasses:
         logger.info("Initializing 3D text renderer...")
         self.text_renderer = Text3DRenderer()
         
+        # Setup GPIO button (if available)
+        self.gpio_button_pin = 17  # GPIO pin 17 (physical pin 11)
+        if GPIO_AVAILABLE and not test_mode:
+            self._setup_gpio_button()
+        
         logger.info("✅ AURA AI Glasses initialized!")
         
         if not test_mode:
@@ -77,6 +90,37 @@ class AURAGlasses:
         else:
             logger.info("   - Press SPACE to start/stop recording")
         logger.info("   - Press Q to quit\n")
+    
+    def _setup_gpio_button(self):
+        """Setup GPIO button for push-to-talk"""
+        try:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self.gpio_button_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            
+            # Add event detection for button press/release
+            GPIO.add_event_detect(
+                self.gpio_button_pin,
+                GPIO.BOTH,
+                callback=self._gpio_button_callback,
+                bouncetime=200
+            )
+            
+            logger.info(f"🔘 GPIO button enabled on pin {self.gpio_button_pin}")
+        except Exception as e:
+            logger.error(f"❌ GPIO setup failed: {e}")
+    
+    def _gpio_button_callback(self, channel):
+        """Callback for GPIO button press/release"""
+        if GPIO.input(channel) == GPIO.LOW:
+            # Button pressed (pulled to ground)
+            if not self.recording and not self.test_mode:
+                logger.info("🔘 Button PRESSED - starting recording")
+                self.process_query()
+        else:
+            # Button released (pulled high)
+            if self.recording:
+                logger.info("🔘 Button RELEASED - stopping recording")
+                self.stop_query()
     
     def process_test_query(self):
         """Process a hardcoded test query without audio"""
@@ -355,7 +399,9 @@ class AURAGlasses:
             logger.info("🧪 TEST MODE ENABLED")
             logger.info("Press 't' to test, 'q' to quit\n")
         else:
-            logger.info("Press SPACE to record, 'q' to quit\n")
+            if GPIO_AVAILABLE:
+                logger.info("🔘 Push-to-talk: Physical button on GPIO pin 17")
+            logger.info("⌨️  Keyboard: Press SPACE to record, 'q' to quit\n")
         
         try:
             logger.info("Entering main loop...")
@@ -420,6 +466,15 @@ class AURAGlasses:
     def cleanup(self):
         """Cleanup resources"""
         logger.info("Cleaning up resources...")
+        
+        # Cleanup GPIO
+        if GPIO_AVAILABLE:
+            try:
+                GPIO.cleanup()
+                logger.info("✅ GPIO cleaned up")
+            except:
+                pass
+        
         self.camera.stop()
         self.audio.cleanup()
         cv2.destroyAllWindows()
