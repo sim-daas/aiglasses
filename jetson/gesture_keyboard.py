@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 class GestureKeyboard:
     """Full QWERTY keyboard controlled by hand gestures"""
     
-    # Full QWERTY keyboard layout (4 rows + zoom controls)
+    # Full QWERTY keyboard layout (5 rows - added TRANSLATE)
     KEYBOARD_LAYOUT = [
         ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
         ['Z', 'X', 'C', 'V', 'B', 'N', 'M'],
         ['SPACE', 'BACK', 'SUBMIT'],
-        ['ZOOM+', 'ZOOM-']  # New zoom controls row
+        ['ZOOM+', 'ZOOM-', 'TRANSLATE']  # Added TRANSLATE button
     ]
     
     # Key dimensions (relative to frame size)
@@ -124,7 +124,7 @@ class GestureKeyboard:
                 if key == 'SPACE':
                     # Space key is wider
                     w = key_w * 3
-                elif key in ['BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-']:
+                elif key in ['BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-', 'TRANSLATE']:
                     w = key_w
                 else:
                     w = key_w
@@ -178,7 +178,7 @@ class GestureKeyboard:
             
             # Calculate text size for centering
             font = cv2.FONT_HERSHEY_SIMPLEX
-            if key in ['SPACE', 'BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-']:
+            if key in ['SPACE', 'BACK', 'SUBMIT', 'ZOOM+', 'ZOOM-', 'TRANSLATE']:
                 font_scale = 0.5
             else:
                 font_scale = 0.7
@@ -195,7 +195,7 @@ class GestureKeyboard:
         now = time.time()
         
         # Special handling for BACK and ZOOM - allow continuous use
-        if key in ['BACK', 'ZOOM+', 'ZOOM-']:
+        if key in ['BACK', 'ZOOM+', 'ZOOM-', 'TRANSLATE']:
             return True
         
         # Check if this key was pressed recently
@@ -222,15 +222,19 @@ class GestureKeyboard:
             # Slow zoom out (clamp to min 1x)
             self.zoom_level = max(1.0, self.zoom_level - self.ZOOM_STEP)
             logger.info(f"Zoom out: {self.zoom_level:.2f}x")
+        elif key == 'TRANSLATE':
+            # TRANSLATE button - no text modification
+            logger.info("TRANSLATE button pressed!")
+            # This will be caught by main.py to trigger translation
         elif key != 'SUBMIT':
             self.typed_text += key.lower()
         
-        # Record the time this key was pressed (except zoom keys)
-        if key not in ['ZOOM+', 'ZOOM-']:
+        # Record the time this key was pressed (except zoom and translate keys)
+        if key not in ['ZOOM+', 'ZOOM-', 'TRANSLATE']:
             self.last_key_press_times[key] = now
         self.last_key_time = now
         
-        if key not in ['ZOOM+', 'ZOOM-']:
+        if key not in ['ZOOM+', 'ZOOM-', 'TRANSLATE']:
             logger.info(f"Key pressed: {key} → Text: '{self.typed_text}'")
     
     def process_frame(self, frame):

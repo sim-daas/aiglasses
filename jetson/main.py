@@ -40,6 +40,13 @@ except ImportError:
     GESTURE_KB_AVAILABLE = False
     logger.warning("⚠️  Gesture keyboard not available. Install with: pip install mediapipe")
 
+try:
+    from live_translator import LiveTranslator
+    TRANSLATOR_AVAILABLE = True
+except ImportError:
+    TRANSLATOR_AVAILABLE = False
+    logger.warning("⚠️  Live translator not available. Install: pip install easyocr langdetect deep-translator")
+
 class AURAGlasses:
     def __init__(self, test_mode=False, use_gesture_kb=False, use_tape_measure=False):
         logger.info("🚀 Initializing AURA AI Glasses...")
@@ -56,13 +63,15 @@ class AURAGlasses:
         self.camera.initialize()
         self.camera.start()
         
-        # State - initialize BEFORE creating objects that depend on them
+        # State - initialize BEFORE creating objects
         self.test_mode = test_mode
         self.use_gesture_kb = use_gesture_kb
         self.use_tape_measure = use_tape_measure
         self.current_result = None
         self.gesture_keyboard = None
-        self.tape_measure = None  # Will be set below if enabled
+        self.tape_measure = None
+        self.translator = None
+        self.translation_results = []
         
         # Initialize tape measure if requested
         if use_tape_measure:
@@ -91,6 +100,11 @@ class AURAGlasses:
                 logger.error("❌ Gesture keyboard requested but MediaPipe not available!")
                 logger.error("   Install with: pip install mediapipe")
                 sys.exit(1)
+        
+        # Initialize translator if gesture keyboard is enabled
+        if use_gesture_kb and TRANSLATOR_AVAILABLE:
+            logger.info("Initializing live translator...")
+            self.translator = LiveTranslator(target_lang='en')
         
         logger.info("✅ AURA AI Glasses initialized!")
         
@@ -238,6 +252,47 @@ class AURAGlasses:
             import traceback
             logger.error(traceback.format_exc())
     
+    def process_translation(self):
+        """Process OCR translation on current frame"""
+        if not self.translator:
+            logger.warning("⚠️  Translator not available")
+            return
+        
+        logger.info("📝 Processing live translation...")
+        
+        try:
+            # Get current frames
+            frame_left, frame_right, depth_map = self.camera.get_frames()
+            
+            if frame_left is None:
+                logger.error("❌ No camera frame available")
+                return
+            
+            # Detect and translate text
+            detections = self.translator.detect_and_translate(frame_left, depth_map)
+            
+            if not detections:
+                logger.info("No text detected")
+                return
+            
+            logger.info(f"✅ Detected {len(detections)} text regions")
+            
+            # Store results for overlay
+            self.translation_results = detections
+            
+            # Broadcast to web clients
+            translation_data = {
+                'type': 'translation',
+                'detections': detections,
+                'timestamp': time.time()
+            }
+            self.server.broadcast_result(translation_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Translation error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
     def _map_location_to_position(self, location, frame_width, frame_height):
         """Map Gemini's text location to pixel coordinates"""
         location_map = {
@@ -302,7 +357,7 @@ class AURAGlasses:
                     # Use only left camera for display
                     display_frame = frame_left.copy()
                     
-                    # Compute depth map for tape measure (only if enabled and frame_right exists)
+                    # Compute depth map for tape measure
                     if self.use_tape_measure and self.tape_measure and frame_right is not None:
                         self.tape_measure.compute_depth(frame_left, frame_right)
                     
@@ -311,28 +366,33 @@ class AURAGlasses:
                         # Get zoom level before processing
                         zoom_level = self.gesture_keyboard.get_zoom_level()
                         
-                        # Apply digital zoom to camera feed BEFORE adding keyboard overlay
+                        # Apply digital zoom
                         if zoom_level > 1.0:
                             h, w = display_frame.shape[:2]
-                            # Calculate crop region for zoom
                             crop_w = int(w / zoom_level)
                             crop_h = int(h / zoom_level)
                             crop_x = (w - crop_w) // 2
                             crop_y = (h - crop_h) // 2
-                            
-                            # Crop and resize to original size
                             cropped = display_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
                             display_frame = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
                         
-                        # Process keyboard overlay AFTER zoom (keyboard stays same size)
+                        # Process keyboard overlay
                         display_frame, status, should_submit = self.gesture_keyboard.process_frame(display_frame)
                         
-                        if should_submit:
+                        # Check for special button presses
+                        if 'TRANSLATE' in status:
+                            # TRANSLATE button pressed
+                            self.process_translation()
+                        elif should_submit:
                             query = self.gesture_keyboard.get_text().strip()
                             if query:
                                 self.process_gesture_query(query)
                     
-                    # Draw tape measure overlay if enabled (check for None)
+                    # Draw translation overlay if available
+                    if self.translation_results and self.translator:
+                        display_frame = self.translator.draw_overlay(display_frame, self.translation_results)
+                    
+                    # Draw tape measure overlay
                     if self.use_tape_measure and self.tape_measure:
                         display_frame = self.tape_measure.draw_overlay(display_frame)
                     
