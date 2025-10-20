@@ -105,11 +105,7 @@ Required JSON structure:
     "transcription": "the user's spoken/written question (if audio provided, transcribe it; otherwise use provided text)",
     "answer": "your CONCISE answer (max 15 words) - ALWAYS provide your best guess, never say 'unknown' or 'N/A'",
     "object": "primary object/subject in the image (single word or short phrase, e.g., 'laptop', 'person', 'cup')",
-    "position": {{
-        "x": 0.5,  // normalized x-coordinate (0.0-1.0) of object center
-        "y": 0.5,  // normalized y-coordinate (0.0-1.0) of object center
-        "confidence": 0.95  // your confidence in this position (0.0-1.0)
-    }}
+    "location": "describe WHERE in the image the object is (e.g., 'center', 'left side', 'top-right corner', 'bottom center')"
 }}
 
 **EXAMPLE OUTPUT:**
@@ -118,20 +114,15 @@ User asks: "What color is this laptop?"
     "transcription": "What color is this laptop?",
     "answer": "Silver aluminum MacBook Pro",
     "object": "laptop",
-    "position": {{
-        "x": 0.52,
-        "y": 0.48,
-        "confidence": 0.92
-    }}
+    "location": "center of image"
 }}
 
 **RULES:**
 1. Always output ONLY valid JSON (no markdown, no extra text)
 2. Keep "answer" under 15 words
 3. NEVER use "unknown" - make educated guesses based on visual context
-4. Position x,y are normalized (0.0 = left/top, 1.0 = right/bottom)
-5. If uncertain about position, use center (0.5, 0.5) with lower confidence
-6. Be confident and commit to an answer
+4. "location" should be a natural description (e.g., "on the left", "in the center", "top-right")
+5. Be confident and commit to an answer
 """
     
     def _parse_response(self, response_text):
@@ -150,20 +141,19 @@ User asks: "What color is this laptop?"
             result = json.loads(response_text)
             
             # Validate required keys
-            required_keys = ['transcription', 'answer', 'object', 'position']
+            required_keys = ['transcription', 'answer', 'object', 'location']
             for key in required_keys:
                 if key not in result:
                     raise ValueError(f"Missing required key: {key}")
             
-            # Validate position
-            pos = result['position']
-            if not all(k in pos for k in ['x', 'y', 'confidence']):
-                raise ValueError("Invalid position structure")
-            
-            # Clamp values
-            result['position']['x'] = max(0.0, min(1.0, float(pos['x'])))
-            result['position']['y'] = max(0.0, min(1.0, float(pos['y'])))
-            result['position']['confidence'] = max(0.0, min(1.0, float(pos['confidence'])))
+            # Add default position for compatibility (center of image)
+            result['position'] = {
+                'x': 0.5,  # Center
+                'y': 0.5,  # Center
+                'z': 0.5,  # Default depth
+                'confidence': 0.8,
+                'description': result['location']
+            }
             
             return result
             
@@ -181,9 +171,12 @@ User asks: "What color is this laptop?"
             "transcription": "Error processing request",
             "answer": "Unable to process - please try again",
             "object": "unknown",
+            "location": "center",
             "position": {
                 "x": 0.5,
                 "y": 0.5,
-                "confidence": 0.0
+                "z": 0.5,
+                "confidence": 0.0,
+                "description": "center"
             }
         }
