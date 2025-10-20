@@ -30,6 +30,7 @@ from audio_manager import AudioManager
 from gemini_client import GeminiClient
 from web_server import WebServer
 from config import Config
+from text_3d_renderer import Text3DRenderer
 
 class AURAGlasses:
     def __init__(self, test_mode=False):
@@ -53,6 +54,10 @@ class AURAGlasses:
         # Initialize web server
         logger.info("Initializing web server...")
         self.server = WebServer(self.camera)
+        
+        # Initialize 3D text renderer
+        logger.info("Initializing 3D text renderer...")
+        self.text_renderer = Text3DRenderer()
         
         # State
         self.recording = False
@@ -229,7 +234,7 @@ class AURAGlasses:
             logger.error(traceback.print_exc())
     
     def _draw_3d_text_overlay(self, frame, result):
-        """Draw 3D text overlay on frame based on location"""
+        """Draw TRUE 3D text overlay with depth layers"""
         if not result:
             return frame
         
@@ -252,89 +257,32 @@ class AURAGlasses:
         location = result.get('location', 'center')
         x, y = location_map.get(location, (int(w * 0.5), int(h * 0.5)))
         
-        # Get answer text
+        # Get answer and object
         answer = result['answer']
         object_name = result['object']
+        depth_value = result.get('position', {}).get('z', 5.0) * 10  # Scale for effect
         
-        # Word wrap for long answers
-        max_chars = 30
-        words = answer.split()
-        lines = []
-        current_line = ""
+        # Render answer with 3D effect
+        frame = self.text_renderer.render_3d_text(
+            frame, 
+            answer, 
+            (x, y), 
+            z_depth=depth_value
+        )
         
-        for word in words:
-            if len(current_line) + len(word) + 1 <= max_chars:
-                current_line += word + " "
-            else:
-                if current_line:
-                    lines.append(current_line.strip())
-                current_line = word + " "
+        # Render object label below with smaller depth
+        label_text = f"[{object_name}]"
+        bbox = cv2.getTextSize(answer, cv2.FONT_HERSHEY_DUPLEX, 0.6, 2)[0]
+        label_y = y + bbox[1] + 30
         
-        if current_line:
-            lines.append(current_line.strip())
+        frame = self.text_renderer.render_3d_text(
+            frame,
+            label_text,
+            (x, label_y),
+            z_depth=depth_value * 0.5
+        )
         
-        # Calculate text size for background box
-        font = cv2.FONT_HERSHEY_DUPLEX
-        font_scale = 0.6
-        thickness = 2
-        
-        max_width = 0
-        total_height = 0
-        line_heights = []
-        
-        for line in lines:
-            (tw, th), baseline = cv2.getTextSize(line, font, font_scale, thickness)
-            max_width = max(max_width, tw)
-            line_heights.append(th + baseline)
-            total_height += th + baseline + 5
-        
-        # Add object name line
-        obj_text = f"[{object_name}]"
-        (obj_w, obj_h), obj_baseline = cv2.getTextSize(obj_text, font, 0.5, 1)
-        max_width = max(max_width, obj_w)
-        total_height += obj_h + obj_baseline + 10
-        
-        # Draw semi-transparent background
-        padding = 15
-        box_x1 = x - max_width // 2 - padding
-        box_y1 = y - total_height // 2 - padding
-        box_x2 = x + max_width // 2 + padding
-        box_y2 = y + total_height // 2 + padding
-        
-        # Ensure box is within frame
-        box_x1 = max(5, box_x1)
-        box_y1 = max(5, box_y1)
-        box_x2 = min(w - 5, box_x2)
-        box_y2 = min(h - 5, box_y2)
-        
-        # Create overlay for transparency
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
-        
-        # Draw border
-        cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (0, 255, 0), 2)
-        
-        # Draw text lines
-        current_y = y - total_height // 2 + 10
-        
-        for i, line in enumerate(lines):
-            # Draw shadow
-            cv2.putText(frame, line, (x - max_width // 2 + 2, current_y + 2),
-                       font, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
-            
-            # Draw main text
-            cv2.putText(frame, line, (x - max_width // 2, current_y),
-                       font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
-            
-            current_y += line_heights[i] + 5
-        
-        # Draw object name
-        current_y += 5
-        cv2.putText(frame, obj_text, (x - obj_w // 2, current_y),
-                   font, 0.5, (0, 200, 255), 1, cv2.LINE_AA)
-        
-        # Draw location indicator dot
+        # Draw location indicator
         cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
         cv2.circle(frame, (x, y), 7, (255, 255, 255), 1)
         

@@ -6,6 +6,7 @@ import json
 import os
 import logging
 from config import Config
+from text_3d_renderer import Text3DRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,10 @@ class WebServer:
         
         self.camera_manager = camera_manager
         self.latest_result = None
-        self.show_overlay = True  # Flag to control overlay
+        self.show_overlay = True
+        
+        # Initialize 3D text renderer
+        self.text_renderer = Text3DRenderer()
         
         logger.info("Setting up Flask routes...")
         self._setup_routes()
@@ -244,14 +248,14 @@ class WebServer:
             return jsonify({"status": "no_data"})
     
     def _draw_3d_text_overlay(self, frame, result):
-        """Draw 3D text overlay on frame for web stream"""
+        """Draw 3D text overlay on web stream"""
         if not result or not self.show_overlay:
             return frame
         
         # Get frame dimensions
         h, w = frame.shape[:2]
         
-        # Map location to coordinates
+        # Location mapping
         location_map = {
             'top-left': (int(w * 0.15), int(h * 0.15)),
             'top-center': (int(w * 0.5), int(h * 0.15)),
@@ -267,88 +271,29 @@ class WebServer:
         location = result.get('location', 'center')
         x, y = location_map.get(location, (int(w * 0.5), int(h * 0.5)))
         
-        # Get answer text
+        # Get text and depth
         answer = result['answer']
         object_name = result['object']
+        depth_value = result.get('position', {}).get('z', 5.0) * 10
         
-        # Word wrap
-        max_chars = 20  # Smaller for web view
-        words = answer.split()
-        lines = []
-        current_line = ""
+        # Render 3D text
+        frame = self.text_renderer.render_3d_text(
+            frame,
+            answer,
+            (x, y),
+            z_depth=depth_value
+        )
         
-        for word in words:
-            if len(current_line) + len(word) + 1 <= max_chars:
-                current_line += word + " "
-            else:
-                if current_line:
-                    lines.append(current_line.strip())
-                current_line = word + " "
+        # Render object label
+        label_text = f"[{object_name}]"
+        frame = self.text_renderer.render_3d_text(
+            frame,
+            label_text,
+            (x, y + 40),
+            z_depth=depth_value * 0.5
+        )
         
-        if current_line:
-            lines.append(current_line.strip())
-        
-        # Text settings
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.5
-        thickness = 1
-        
-        max_width = 0
-        total_height = 0
-        line_heights = []
-        
-        for line in lines:
-            (tw, th), baseline = cv2.getTextSize(line, font, font_scale, thickness)
-            max_width = max(max_width, tw)
-            line_heights.append(th + baseline)
-            total_height += th + baseline + 3
-        
-        # Add object name
-        obj_text = f"[{object_name}]"
-        (obj_w, obj_h), obj_baseline = cv2.getTextSize(obj_text, font, 0.4, 1)
-        max_width = max(max_width, obj_w)
-        total_height += obj_h + obj_baseline + 8
-        
-        # Draw background box
-        padding = 10
-        box_x1 = x - max_width // 2 - padding
-        box_y1 = y - total_height // 2 - padding
-        box_x2 = x + max_width // 2 + padding
-        box_y2 = y + total_height // 2 + padding
-        
-        # Clamp to frame
-        box_x1 = max(3, box_x1)
-        box_y1 = max(3, box_y1)
-        box_x2 = min(w - 3, box_x2)
-        box_y2 = min(h - 3, box_y2)
-        
-        # Semi-transparent background
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
-        
-        # Border
-        cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (0, 255, 0), 1)
-        
-        # Draw text
-        current_y = y - total_height // 2 + 8
-        
-        for i, line in enumerate(lines):
-            # Shadow
-            cv2.putText(frame, line, (x - max_width // 2 + 1, current_y + 1),
-                       font, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
-            # Main text
-            cv2.putText(frame, line, (x - max_width // 2, current_y),
-                       font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
-            
-            current_y += line_heights[i] + 3
-        
-        # Object name
-        current_y += 3
-        cv2.putText(frame, obj_text, (x - obj_w // 2, current_y),
-                   font, 0.4, (0, 200, 255), 1, cv2.LINE_AA)
-        
-        # Location dot
+        # Location indicator
         cv2.circle(frame, (x, y), 3, (0, 255, 0), -1)
         cv2.circle(frame, (x, y), 5, (255, 255, 255), 1)
         
