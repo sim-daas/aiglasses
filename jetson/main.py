@@ -437,8 +437,15 @@ class AURAGlasses:
             
             logger.info("📸 Frame captured, sending to Gemini for translation...")
             
-            # Create translation prompt
-            translation_query = "Please detect and translate all visible text in this image to English. For each text region found, provide: 1) The original text, 2) The detected language, 3) The English translation, 4) The approximate location in the image (e.g., top-left, center-right, bottom-center). Format your response as a clear numbered list. If no text is found, say 'No text detected'."
+            # Create concise translation prompt
+            translation_query = """Look at this image and identify the MAIN or MOST PROMINENT text visible. 
+Provide a brief summary in this format:
+- Main text: [the primary text you see]
+- Language: [detected language]
+- Translation: [English translation if not already in English]
+- Summary: [one sentence explaining what this text is about]
+
+Focus only on the most important text, ignore small labels or background text."""
             
             # Process with Gemini
             result = self.gemini.process_multimodal_query(
