@@ -73,7 +73,10 @@ class AURAGlasses:
         self.tape_measure = None
         self.translator = None
         self.translation_results = []
-        self.last_translate_time = 0  # Track last translation to avoid spam
+        self.last_translate_time = 0
+        self.submit_pending = False  # Track pending submit
+        self.submit_time = 0  # When submit was pressed
+        self.submit_query = ""  # Query to submit
         
         # Initialize tape measure if requested
         if use_tape_measure:
@@ -213,124 +216,6 @@ class AURAGlasses:
             import traceback
             logger.error(traceback.format_exc())
     
-    def process_gesture_query(self, query_text):
-        """Process query from gesture keyboard with 5-second delay"""
-        logger.info("\n" + "="*50)
-        logger.info(f"✋ Processing gesture query: '{query_text}'")
-        logger.info("⏳ Waiting 5 seconds before capturing frame...")
-        logger.info("="*50)
-        
-        # Wait 5 seconds before capturing
-        time.sleep(5.0)
-        
-        try:
-            # Get current frame AFTER 5 second delay
-            frame_left, frame_right, depth_map = self.camera.get_frames()
-            
-            if frame_left is None:
-                logger.error("❌ No camera frame available")
-                return
-            
-            # Save frame to temporary file
-            image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
-            cv2.imwrite(image_file.name, frame_right)
-            
-            logger.info("📸 Frame captured after 5s delay, sending to Gemini...")
-            
-            # Process with Gemini
-            result = self.gemini.process_multimodal_query(
-                image_path=image_file.name,
-                text_query=query_text
-            )
-            
-            # Add depth information
-            pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
-            pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
-            depth_value = self.camera.get_depth_at_point(pos_x, pos_y)
-            
-            result['position']['z'] = depth_value
-            result['position']['depth_normalized'] = depth_value
-            
-            # Display results
-            logger.info("📊 RESULTS:")
-            logger.info(f"   Q: {result['transcription']}")
-            logger.info(f"   A: {result['answer']}")
-            logger.info(f"   Object: {result['object']}")
-            logger.info(f"   Position: ({result['position']['x']:.2f}, {result['position']['y']:.2f}, {depth_value:.2f})")
-            
-            # Broadcast to web clients
-            self.server.broadcast_result(result)
-            self.current_result = result
-            
-            # Reset gesture keyboard
-            if self.gesture_keyboard:
-                self.gesture_keyboard.reset_text()
-            
-            # Cleanup
-            os.unlink(image_file.name)
-            logger.info("✅ Gesture query processing complete!")
-            
-        except Exception as e:
-            logger.error(f"❌ Processing error: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-    
-    def process_translation(self):
-        """Process OCR translation on current frame"""
-        if not self.translator:
-            logger.warning("⚠️  Translator not available")
-            return
-        
-        logger.info("📝 Processing live translation...")
-        
-        try:
-            # Get current frames
-            frame_left, frame_right, depth_map = self.camera.get_frames()
-            
-            if frame_left is None:
-                logger.error("❌ No camera frame available")
-                return
-            
-            # Detect and translate text
-            detections = self.translator.detect_and_translate(frame_left, depth_map)
-            
-            if not detections:
-                logger.info("No text detected")
-                return
-            
-            logger.info(f"✅ Detected {len(detections)} text regions")
-            
-            # Store results for overlay
-            self.translation_results = detections
-            
-            # Broadcast to web clients
-            translation_data = {
-                'type': 'translation',
-                'detections': detections,
-                'timestamp': time.time()
-            }
-            self.server.broadcast_result(translation_data)
-            
-        except Exception as e:
-            logger.error(f"❌ Translation error: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-    
-    def _map_location_to_position(self, location, frame_width, frame_height):
-        """Map Gemini's text location to pixel coordinates"""
-        location_map = {
-            'top-left': (int(frame_width * 0.20), int(frame_height * 0.20)),
-            'top-center': (int(frame_width * 0.50), int(frame_height * 0.20)),
-            'top-right': (int(frame_width * 0.80), int(frame_height * 0.20)),
-            'center-left': (int(frame_width * 0.20), int(frame_height * 0.50)),
-            'center': (int(frame_width * 0.50), int(frame_height * 0.50)),
-            'center-right': (int(frame_width * 0.80), int(frame_height * 0.50)),
-            'bottom-left': (int(frame_width * 0.20), int(frame_height * 0.80)),
-            'bottom-center': (int(frame_width * 0.50), int(frame_height * 0.80)),
-            'bottom-right': (int(frame_width * 0.80), int(frame_height * 0.80)),
-        }
-        return location_map.get(location.lower(), (int(frame_width * 0.5), int(frame_height * 0.5)))
-    
     def run(self):
         """Run the main application"""
         # Start web server
@@ -401,22 +286,64 @@ class AURAGlasses:
                         # Process keyboard overlay
                         display_frame, status, should_submit = self.gesture_keyboard.process_frame(display_frame)
                         
-                        # Check for TRANSLATE button (with cooldown to avoid spam)
+                        # Check for TRANSLATE button
                         current_time = time.time()
                         if 'Typed: TRANSLATE' in status and (current_time - self.last_translate_time) > 2.0:
-                            # Only trigger if translator is available
                             if self.translator:
                                 self.process_translation()
                                 self.last_translate_time = current_time
                             else:
-                                # Log once, not repeatedly
                                 if (current_time - self.last_translate_time) > 10.0:
                                     logger.warning("⚠️  Translator not initialized. Install: pip install easyocr langdetect deep-translator")
                                 self.last_translate_time = current_time
                         elif should_submit:
+                            # SUBMIT button pressed - start countdown
                             query = self.gesture_keyboard.get_text().strip()
-                            if query:
-                                self.process_gesture_query(query)
+                            if query and not self.submit_pending:
+                                self.submit_pending = True
+                                self.submit_time = current_time
+                                self.submit_query = query
+                                logger.info(f"⏳ SUBMIT pressed! Capturing in 5 seconds for query: '{query}'")
+                                self.gesture_keyboard.reset_text()
+                    
+                    # Check if 5 seconds have passed since submit
+                    if self.submit_pending:
+                        current_time = time.time()
+                        elapsed = current_time - self.submit_time
+                        remaining = 5.0 - elapsed
+                        
+                        # Draw countdown on display_frame
+                        if remaining > 0:
+                            countdown_text = f"Capturing in {remaining:.1f}s..."
+                            h, w = display_frame.shape[:2]
+                            
+                            # Large centered countdown
+                            font = cv2.FONT_HERSHEY_SIMPLEX
+                            font_scale = 1.5
+                            thickness = 3
+                            text_size = cv2.getTextSize(countdown_text, font, font_scale, thickness)[0]
+                            text_x = (w - text_size[0]) // 2
+                            text_y = (h + text_size[1]) // 2
+                            
+                            # Background rectangle
+                            padding = 20
+                            cv2.rectangle(display_frame,
+                                        (text_x - padding, text_y - text_size[1] - padding),
+                                        (text_x + text_size[0] + padding, text_y + padding),
+                                        (0, 0, 0), -1)
+                            
+                            # Countdown text
+                            cv2.putText(display_frame, countdown_text, (text_x, text_y),
+                                       font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
+                        else:
+                            # Time's up - capture and process
+                            logger.info("📸 5 seconds elapsed, capturing frame now...")
+                            self.submit_pending = False
+                            
+                            # Process the query with current frame
+                            threading.Thread(target=self._process_delayed_query, 
+                                           args=(self.submit_query, frame_left, frame_right, depth_map),
+                                           daemon=True).start()
                     
                     # Draw translation overlay if available
                     if self.translation_results and self.translator:
@@ -426,9 +353,7 @@ class AURAGlasses:
                     if self.use_tape_measure and self.tape_measure:
                         display_frame = self.tape_measure.draw_overlay(display_frame)
                     
-                    # Frame counter removed - no longer displayed
-                    
-                    # Store processed frame for web streaming (with all overlays)
+                    # Store processed frame for web streaming
                     self.camera.set_processed_frame(display_frame)
                     
                     # Show single camera view (ONLY if not headless)
@@ -445,12 +370,10 @@ class AURAGlasses:
                             logger.warning(f"⚠️  OpenCV display error (switching to headless): {e}")
                             self.headless = True  # Switch to headless if display fails
                 
-                # Handle keyboard input (waitKey only works with windows, use alternative for headless)
+                # Handle keyboard input
                 if not self.headless:
                     key = cv2.waitKey(1) & 0xFF
                 else:
-                    # In headless mode, use a simple input check with timeout
-                    # This allows 't' and 'q' commands via stdin
                     import select
                     if select.select([sys.stdin], [], [], 0.01)[0]:
                         key_input = sys.stdin.read(1).lower()
@@ -464,19 +387,15 @@ class AURAGlasses:
                     logger.info("'q' pressed - shutting down")
                     break
                 elif key == ord('1') and self.use_tape_measure:
-                    # Set point 1 at center
                     if self.tape_measure:
                         self.tape_measure.set_point1(self.tape_measure.cx, self.tape_measure.cy)
                 elif key == ord('2') and self.use_tape_measure:
-                    # Set point 2 at center
                     if self.tape_measure:
                         self.tape_measure.set_point2(self.tape_measure.cx, self.tape_measure.cy)
                 elif key == ord('a') and self.use_tape_measure:
-                    # Place arrow at center
                     if self.tape_measure:
                         self.tape_measure.set_arrow(self.tape_measure.cx, self.tape_measure.cy)
                 elif key == ord('r') and self.use_tape_measure:
-                    # Reset measurements
                     if self.tape_measure:
                         self.tape_measure.clear_measurements()
                 
@@ -486,6 +405,55 @@ class AURAGlasses:
             logger.info("\n👋 Interrupted, shutting down...")
         finally:
             self.cleanup()
+    
+    def _process_delayed_query(self, query_text, frame_left, frame_right, depth_map):
+        """Process query in background thread (called after 5-second delay)"""
+        logger.info(f"✋ Processing delayed query: '{query_text}'")
+        
+        try:
+            if frame_left is None:
+                logger.error("❌ No camera frame available")
+                return
+            
+            # Save frame to temporary file
+            image_file = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
+            cv2.imwrite(image_file.name, frame_right if frame_right is not None else frame_left)
+            
+            logger.info("📸 Frame captured, sending to Gemini...")
+            
+            # Process with Gemini
+            result = self.gemini.process_multimodal_query(
+                image_path=image_file.name,
+                text_query=query_text
+            )
+            
+            # Add depth information
+            pos_x = int(result['position']['x'] * Config.SINGLE_CAM_WIDTH)
+            pos_y = int(result['position']['y'] * Config.SINGLE_CAM_HEIGHT)
+            depth_value = self.camera.get_depth_at_point(pos_x, pos_y)
+            
+            result['position']['z'] = depth_value
+            result['position']['depth_normalized'] = depth_value
+            
+            # Display results
+            logger.info("📊 RESULTS:")
+            logger.info(f"   Q: {result['transcription']}")
+            logger.info(f"   A: {result['answer']}")
+            logger.info(f"   Object: {result['object']}")
+            logger.info(f"   Position: ({result['position']['x']:.2f}, {result['position']['y']:.2f}, {depth_value:.2f})")
+            
+            # Broadcast to web clients
+            self.server.broadcast_result(result)
+            self.current_result = result
+            
+            # Cleanup
+            os.unlink(image_file.name)
+            logger.info("✅ Query processing complete!")
+            
+        except Exception as e:
+            logger.error(f"❌ Processing error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def cleanup(self):
         """Cleanup resources"""
