@@ -266,7 +266,11 @@ class AURAGlasses:
                         # Check for TRANSLATE button
                         current_time = time.time()
                         if 'Typed: TRANSLATE' in status and (current_time - self.last_translate_time) > 2.0:
-                            # Start translate countdown (no OCR check needed)
+                            # Clear previous results when new translate is pressed
+                            self.current_result = None
+                            self.translation_results = None
+                            
+                            # Start translate countdown
                             self.translate_pending = True
                             self.translate_time = current_time
                             self.last_translate_time = current_time
@@ -275,6 +279,10 @@ class AURAGlasses:
                             # SUBMIT button pressed - start countdown
                             query = self.gesture_keyboard.get_text().strip()
                             if query and not self.submit_pending:
+                                # Clear previous results when new submit is pressed
+                                self.current_result = None
+                                self.translation_results = None
+                                
                                 self.submit_pending = True
                                 self.submit_time = current_time
                                 self.submit_query = query
@@ -437,14 +445,12 @@ class AURAGlasses:
             
             logger.info("📸 Frame captured, sending to Gemini for translation...")
             
-            # Create concise translation prompt
+            # Create concise translation prompt - output only English
             translation_query = """Look at this image and identify the MAIN or MOST PROMINENT text visible. 
-Provide a brief summary in this format:
-- Main text: [the primary text you see]
-- Language: [detected language]
-- Translation: [English translation if not already in English]
-- Summary: [one sentence explaining what this text is about]
-
+Provide ONLY the English translation in a clear, natural sentence format.
+Do not include the original text, language name, or any formatting.
+Just provide the translated English text as it would naturally be read.
+If the text is already in English, just provide the text as-is.
 Focus only on the most important text, ignore small labels or background text."""
             
             # Process with Gemini
@@ -462,7 +468,6 @@ Focus only on the most important text, ignore small labels or background text.""
             result['position']['depth_normalized'] = depth_value
             
             logger.info("📊 TRANSLATION RESULTS:")
-            logger.info(f"   Q: {result['transcription']}")
             logger.info(f"   A: {result['answer']}")
             
             # Broadcast to web clients
@@ -473,18 +478,12 @@ Focus only on the most important text, ignore small labels or background text.""
             os.unlink(image_file.name)
             logger.info("✅ Translation processing complete!")
             
-            # Clear translation results after 15 seconds
-            threading.Timer(15.0, self._clear_translation_results).start()
+            # NO auto-clear timer - keep displaying until next submit/translate
             
         except Exception as e:
             logger.error(f"❌ Translation processing error: {e}")
             import traceback
             logger.error(traceback.format_exc())
-    
-    def _clear_translation_results(self):
-        """Clear translation overlay after timeout"""
-        self.translation_results = None
-        logger.info("🗑️ Translation results cleared")
     
     def _process_delayed_query(self, query_text, frame_left, frame_right, depth_map):
         """Process query in background thread (called after 5-second delay)"""
