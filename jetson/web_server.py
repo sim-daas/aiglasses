@@ -520,10 +520,10 @@ class WebServer:
         # Get text and depth
         answer = result['answer']
         object_name = result['object']
-        depth_normalized = result.get('position', {}).get('z', 0.5);
+        depth_normalized = result.get('position', {}).get('z', 0.5)
         
         # Convert depth to z_depth (inverse for proper scaling)
-        z_depth = 20.0 - (depth_normalized * 15.0);
+        z_depth = 20.0 - (depth_normalized * 15.0)
         
         # Render 3D text
         frame = self.text_renderer.render_3d_text(
@@ -531,23 +531,23 @@ class WebServer:
             answer,
             (x, y),
             z_depth=z_depth
-        );
+        )
         
-        // Render object label
-        label_offset = int(h * 0.08);
-        label_y = Math.min(y + label_offset, h - 50);
+        # Render object label
+        label_offset = int(h * 0.08)
+        label_y = min(y + label_offset, h - 50)
         frame = this.text_renderer.render_3d_text(
             frame,
-            `[${object_name}]`,
+            f"[{object_name}]",
             (x, label_y),
             z_depth=z_depth * 0.5
-        );
+        )
         
-        // Location indicator
-        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1);
-        cv2.circle(frame, (x, y), 8, (255, 255, 255), 1);
+        # Location indicator
+        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+        cv2.circle(frame, (x, y), 8, (255, 255, 255), 1)
         
-        return frame;
+        return frame
     
     def _generate_frames(self):
         """Generate JPEG frames with 3D text overlay"""
