@@ -523,48 +523,48 @@ class WebServer:
         depth_value = result.get('position', {}).get('z', 0.5)
         
         # Convert depth to z_depth (inverse relationship for proper scaling)
-        z_depth = 1.0 + (1.0 - depth_value) * 19.0;
+        z_depth = 1.0 + (1.0 - depth_value) * 19.0
         
         # Render 3D text
-        frame = this.text_renderer.render_3d_text(
+        frame = self.text_renderer.render_3d_text(
             frame,
             answer,
             (x, y),
             z_depth=z_depth
-        );
+        )
         
         # Render object label
-        label_text = f"[{object_name}]";
-        frame = this.text_renderer.render_3d_text(
+        label_text = f"[{object_name}]"
+        frame = self.text_renderer.render_3d_text(
             frame,
             label_text,
             (x, y + 50),
             z_depth=z_depth * 0.7
-        );
+        )
         
         # Location indicator
-        cv2.circle(frame, (x, y - 15), 3, (0, 255, 0), -1);
-        cv2.circle(frame, (x, y - 15), 5, (255, 255, 255), 1);
+        cv2.circle(frame, (x, y - 15), 3, (0, 255, 0), -1)
+        cv2.circle(frame, (x, y - 15), 5, (255, 255, 255), 1)
         
-        return frame;
+        return frame
     
     def _generate_frames(self):
         """Generate JPEG frames with 3D text overlay"""
         while True:
-            frame_left, frame_right, depth_map = self.camera_manager.get_frames();
+            frame_left, frame_right, depth_map = self.camera_manager.get_frames()
             
             if frame_left is not None:
                 # Add 3D text overlay if we have results
-                if this.latest_result:
-                    frame_left = this._draw_3d_text_overlay(frame_left, this.latest_result);
+                if self.latest_result:
+                    frame_left = self._draw_3d_text_overlay(frame_left, self.latest_result)
                 
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame_left, 
-                                          [cv2.IMWRITE_JPEG_QUALITY, 85]);
-                frame_bytes = buffer.tobytes();
+                                          [cv2.IMWRITE_JPEG_QUALITY, 85])
+                frame_bytes = buffer.tobytes()
                 
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n');
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
     
     def _setup_socketio(self):
         """Setup WebSocket event handlers"""
