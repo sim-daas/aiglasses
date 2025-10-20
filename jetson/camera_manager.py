@@ -11,8 +11,6 @@ class StereoCamera:
         self.frame_right = None
         self.depth_map = None
         self.processed_frame = None  # For web display with overlays
-        self.running = False
-        self.lock = threading.Lock()
         self.frame_lock = threading.Lock()
         
         # Stereo matcher

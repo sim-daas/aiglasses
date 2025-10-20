@@ -417,6 +417,9 @@ class AURAGlasses:
                     cv2.putText(display_frame, f"Frame: {frame_count}", (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     
+                    # Store processed frame for web streaming (with all overlays)
+                    self.camera.set_processed_frame(display_frame)
+                    
                     # Show single camera view (ONLY if not headless)
                     if not self.headless:
                         try:

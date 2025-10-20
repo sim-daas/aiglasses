@@ -5,6 +5,7 @@ import cv2
 import logging
 import json
 import os
+import time  # <-- ADD THIS MISSING IMPORT
 from config import Config
 from text_3d_renderer import Text3DRenderer
 
@@ -15,6 +16,7 @@ class WebServer:
         """Initialize web server with optional tape measure for depth data"""
         self.camera_manager = camera_manager
         self.tape_measure = tape_measure
+        self.latest_result = None  # <-- ADD THIS (was missing)
         
         # Get absolute path to web directory
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -531,7 +533,7 @@ class WebServer:
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame, 
                                           [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = buffer.tobytes()
+                frame_bytes = buffer.tobytes();
                 
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
