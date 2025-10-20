@@ -492,19 +492,19 @@ class WebServer:
             return jsonify({"status": "no_data"})
     
     def _map_location_to_position(self, location, frame_width, frame_height):
-        """Map grid location to pixel coordinates"""
+        """Map Gemini's text location to pixel coordinates"""
         location_map = {
-            'top-left': (int(frame_width * 0.15), int(frame_height * 0.15)),
-            'top-center': (int(frame_width * 0.5), int(frame_height * 0.15)),
-            'top-right': (int(frame_width * 0.85), int(frame_height * 0.15)),
-            'center-left': (int(frame_width * 0.15), int(frame_height * 0.5)),
-            'center': (int(frame_width * 0.5), int(frame_height * 0.5)),
-            'center-right': (int(frame_width * 0.85), int(frame_height * 0.5)),
-            'bottom-left': (int(frame_width * 0.15), int(frame_height * 0.85)),
-            'bottom-center': (int(frame_width * 0.5), int(frame_height * 0.85)),
-            'bottom-right': (int(frame_width * 0.85), int(frame_height * 0.85)),
+            'top-left': (int(frame_width * 0.20), int(frame_height * 0.20)),
+            'top-center': (int(frame_width * 0.50), int(frame_height * 0.20)),
+            'top-right': (int(frame_width * 0.80), int(frame_height * 0.20)),
+            'center-left': (int(frame_width * 0.20), int(frame_height * 0.50)),
+            'center': (int(frame_width * 0.50), int(frame_height * 0.50)),
+            'center-right': (int(frame_width * 0.80), int(frame_height * 0.50)),
+            'bottom-left': (int(frame_width * 0.20), int(frame_height * 0.80)),
+            'bottom-center': (int(frame_width * 0.50), int(frame_height * 0.80)),
+            'bottom-right': (int(frame_width * 0.80), int(frame_height * 0.80)),
         }
-        return location_map.get(location, (int(frame_width * 0.5), int(frame_height * 0.5)))
+        return location_map.get(location.lower(), (int(frame_width * 0.5), int(frame_height * 0.5)))
     
     def _draw_3d_text_overlay(self, frame, result):
         """Draw 3D text overlay on web stream"""
@@ -513,17 +513,17 @@ class WebServer:
         
         h, w = frame.shape[:2]
         
-        # Get location
+        # Get location from Gemini
         location = result.get('location', 'center')
         x, y = self._map_location_to_position(location, w, h)
         
         # Get text and depth
         answer = result['answer']
         object_name = result['object']
-        depth_value = result.get('position', {}).get('z', 0.5)
+        depth_normalized = result.get('position', {}).get('z', 0.5);
         
-        # Convert depth to z_depth (inverse relationship for proper scaling)
-        z_depth = 1.0 + (1.0 - depth_value) * 19.0
+        # Convert depth to z_depth (inverse for proper scaling)
+        z_depth = 20.0 - (depth_normalized * 15.0);
         
         # Render 3D text
         frame = self.text_renderer.render_3d_text(
@@ -531,40 +531,41 @@ class WebServer:
             answer,
             (x, y),
             z_depth=z_depth
-        )
+        );
         
-        # Render object label
-        label_text = f"[{object_name}]"
-        frame = self.text_renderer.render_3d_text(
+        // Render object label
+        label_offset = int(h * 0.08);
+        label_y = Math.min(y + label_offset, h - 50);
+        frame = this.text_renderer.render_3d_text(
             frame,
-            label_text,
-            (x, y + 50),
-            z_depth=z_depth * 0.7
-        )
+            `[${object_name}]`,
+            (x, label_y),
+            z_depth=z_depth * 0.5
+        );
         
-        # Location indicator
-        cv2.circle(frame, (x, y - 15), 3, (0, 255, 0), -1)
-        cv2.circle(frame, (x, y - 15), 5, (255, 255, 255), 1)
+        // Location indicator
+        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1);
+        cv2.circle(frame, (x, y), 8, (255, 255, 255), 1);
         
-        return frame
+        return frame;
     
     def _generate_frames(self):
         """Generate JPEG frames with 3D text overlay"""
         while True:
-            frame_left, frame_right, depth_map = self.camera_manager.get_frames()
+            frame_left, frame_right, depth_map = self.camera_manager.get_frames();
             
             if frame_left is not None:
                 # Add 3D text overlay if we have results
                 if self.latest_result:
-                    frame_left = self._draw_3d_text_overlay(frame_left, self.latest_result)
+                    frame_left = self._draw_3d_text_overlay(frame_left, self.latest_result);
                 
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame_left, 
-                                          [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = buffer.tobytes()
+                                          [cv2.IMWRITE_JPEG_QUALITY, 85]);
+                frame_bytes = buffer.tobytes();
                 
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n');
     
     def _setup_socketio(self):
         """Setup WebSocket event handlers"""

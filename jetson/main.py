@@ -234,19 +234,19 @@ class AURAGlasses:
             logger.error(traceback.print_exc())
     
     def _map_location_to_position(self, location, frame_width, frame_height):
-        """Map grid location to pixel coordinates"""
+        """Map Gemini's text location to pixel coordinates"""
         location_map = {
-            'top-left': (int(frame_width * 0.15), int(frame_height * 0.15)),
-            'top-center': (int(frame_width * 0.5), int(frame_height * 0.15)),
-            'top-right': (int(frame_width * 0.85), int(frame_height * 0.15)),
-            'center-left': (int(frame_width * 0.15), int(frame_height * 0.5)),
-            'center': (int(frame_width * 0.5), int(frame_height * 0.5)),
-            'center-right': (int(frame_width * 0.85), int(frame_height * 0.5)),
-            'bottom-left': (int(frame_width * 0.15), int(frame_height * 0.85)),
-            'bottom-center': (int(frame_width * 0.5), int(frame_height * 0.85)),
-            'bottom-right': (int(frame_width * 0.85), int(frame_height * 0.85)),
+            'top-left': (int(frame_width * 0.20), int(frame_height * 0.20)),
+            'top-center': (int(frame_width * 0.50), int(frame_height * 0.20)),
+            'top-right': (int(frame_width * 0.80), int(frame_height * 0.20)),
+            'center-left': (int(frame_width * 0.20), int(frame_height * 0.50)),
+            'center': (int(frame_width * 0.50), int(frame_height * 0.50)),
+            'center-right': (int(frame_width * 0.80), int(frame_height * 0.50)),
+            'bottom-left': (int(frame_width * 0.20), int(frame_height * 0.80)),
+            'bottom-center': (int(frame_width * 0.50), int(frame_height * 0.80)),
+            'bottom-right': (int(frame_width * 0.80), int(frame_height * 0.80)),
         }
-        return location_map.get(location, (int(frame_width * 0.5), int(frame_height * 0.5)))
+        return location_map.get(location.lower(), (int(frame_width * 0.5), int(frame_height * 0.5)))
     
     def _draw_3d_text_overlay(self, frame, result):
         """Draw 3D text with proper depth-based perspective scaling"""
@@ -255,28 +255,29 @@ class AURAGlasses:
         
         h, w = frame.shape[:2]
         
-        # Get Gemini's normalized coordinates (0-1 range)
-        gemini_x = result.get('position', {}).get('x', 0.5)
-        gemini_y = result.get('position', {}).get('y', 0.5)
-        depth_normalized = result.get('position', {}).get('z', 0.5)  # From stereo
+        # Get location from Gemini (text-based: "center", "top-right", etc.)
+        location = result.get('location', 'center')
         
-        # Convert to pixel coordinates
-        pixel_x = int(gemini_x * w)
-        pixel_y = int(gemini_y * h)
+        # Convert location to pixel coordinates
+        pixel_x, pixel_y = self._map_location_to_position(location, w, h)
+        
+        # Get depth from stereo (normalized 0-1, where 0=close, 1=far)
+        depth_normalized = result.get('position', {}).get('z', 0.5)
         
         # Calculate z_depth for perspective scaling
-        # Near objects (depth close to 0) = larger text (high z_depth value)
-        # Far objects (depth close to 1) = smaller text (low z_depth value)
-        z_depth = 5.0 + (1.0 - depth_normalized) * 15.0  # Range: 5 to 20
+        # Close objects (depth ~0) = larger text (z_depth ~20)
+        # Far objects (depth ~1) = smaller text (z_depth ~5)
+        z_depth = 20.0 - (depth_normalized * 15.0)  # Range: 5 to 20
         
         # Get text content
         answer = result['answer']
         object_name = result['object']
         
         logger.info(f"📍 Rendering 3D text:")
-        logger.info(f"   Position: ({pixel_x}, {pixel_y})")
+        logger.info(f"   Location: '{location}' -> ({pixel_x}, {pixel_y})")
         logger.info(f"   Depth: {depth_normalized:.3f} -> z_depth: {z_depth:.2f}")
-        logger.info(f"   Text: '{answer[:50]}...'")
+        logger.info(f"   Frame: {w}x{h}")
+        logger.info(f"   Text: '{answer[:50]}{'...' if len(answer) > 50 else ''}'")
         
         # Render main answer with 3D effect
         frame = self.text_renderer.render_3d_text(
@@ -286,34 +287,54 @@ class AURAGlasses:
             z_depth=z_depth
         )
         
-        # Render object label below with smaller scale
-        label_y = pixel_y + int(30 * (z_depth / 10.0))  # Proportional spacing
+        # Render object label below (smaller, different position)
+        label_offset = int(h * 0.08)  # 8% of frame height
+        label_y = min(pixel_y + label_offset, h - 50)  # Keep within bounds
         frame = self.text_renderer.render_3d_text(
             frame,
             f"[{object_name}]",
             (pixel_x, label_y),
-            z_depth=z_depth * 0.6  # Smaller label
+            z_depth=z_depth * 0.5  # Smaller label
         )
         
-        # Draw positioning indicator (crosshair)
-        indicator_size = max(3, int(10 * (z_depth / 10.0)))
-        cv2.circle(frame, (pixel_x, pixel_y - 15), indicator_size, (0, 255, 0), -1)
-        cv2.circle(frame, (pixel_x, pixel_y - 15), indicator_size + 2, (255, 255, 255), 1)
+        # Draw positioning indicator (crosshair at center)
+        indicator_size = max(3, int(w / 200))
+        indicator_color = (0, 255, 0)
         
-        # Draw depth indicator bar
-        depth_bar_x = pixel_x - 50
-        depth_bar_y = pixel_y - 30
-        depth_bar_width = 100
-        depth_bar_height = 5
-        cv2.rectangle(frame, 
-                     (depth_bar_x, depth_bar_y),
-                     (depth_bar_x + depth_bar_width, depth_bar_y + depth_bar_height),
-                     (100, 100, 100), -1)
-        filled_width = int(depth_bar_width * depth_normalized)
+        # Crosshair
+        cv2.line(frame, 
+                (pixel_x - 10, pixel_y), (pixel_x + 10, pixel_y),
+                indicator_color, 2)
+        cv2.line(frame,
+                (pixel_x, pixel_y - 10), (pixel_x, pixel_y + 10),
+                indicator_color, 2)
+        cv2.circle(frame, (pixel_x, pixel_y), 8, indicator_color, 2)
+        
+        # Draw depth indicator bar (horizontal bar showing distance)
+        bar_width = int(w * 0.12)  # 12% of frame width
+        bar_height = 6
+        bar_x = pixel_x - bar_width // 2
+        bar_y = pixel_y - int(h * 0.05)  # Above crosshair
+        
+        # Background bar
         cv2.rectangle(frame,
-                     (depth_bar_x, depth_bar_y),
-                     (depth_bar_x + filled_width, depth_bar_y + depth_bar_height),
-                     (0, 255, 0), -1)
+                     (bar_x, bar_y),
+                     (bar_x + bar_width, bar_y + bar_height),
+                     (50, 50, 50), -1)
+        
+        # Filled portion (inversely proportional to depth)
+        filled_width = int(bar_width * (1.0 - depth_normalized))
+        color = (0, int(255 * (1.0 - depth_normalized)), int(255 * depth_normalized))
+        cv2.rectangle(frame,
+                     (bar_x, bar_y),
+                     (bar_x + filled_width, bar_y + bar_height),
+                     color, -1)
+        
+        # Depth text
+        depth_text = f"{depth_normalized:.2f}m"
+        cv2.putText(frame, depth_text,
+                   (bar_x, bar_y - 8),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
         
         return frame
     

@@ -15,25 +15,27 @@ class Text3DRenderer:
     def get_default_params():
         """Default parameters matching detect.py and 3dtext.py"""
         return {
-            "font_size": 48,
-            "scale_factor": 100.0,
+            "font_size": 32,  # Reduced from 48 for better fit
+            "scale_factor": 80.0,  # Reduced from 100.0
             "shadow_offset_x": 5,
             "shadow_offset_y": 5,
             "shadow_blur": 3,
             "shadow_opacity": 0.6,
-            "text_color_r": 255,
+            "text_color_r": 0,
             "text_color_g": 255,
-            "text_color_b": 255,
+            "text_color_b": 0,
             "shadow_color_r": 0,
             "shadow_color_g": 0,
             "shadow_color_b": 0,
-            "depth_color_r": 128,
-            "depth_color_g": 128,
-            "depth_color_b": 128,
+            "depth_color_r": 100,
+            "depth_color_g": 100,
+            "depth_color_b": 100,
             "enable_shadow": True,
             "enable_depth": True,
             "enable_outline": True,
-            "auto_shadow_direction": True
+            "auto_shadow_direction": True,
+            "max_text_width_ratio": 0.6,  # Text takes max 60% of frame width
+            "max_chars_per_line": 40  # Maximum characters per line
         }
     
     def calculate_auto_shadow_direction(self, text_x, text_y, image_width, image_height, z_depth):
@@ -53,6 +55,42 @@ class Text3DRenderer:
         shadow_y += base_distance * 0.25
         
         return int(shadow_x), int(shadow_y)
+    
+    def _wrap_text(self, text, font, max_width):
+        """
+        Wrap text to fit within max_width
+        
+        Args:
+            text: String to wrap
+            font: PIL Font object
+            max_width: Maximum width in pixels
+            
+        Returns:
+            List of text lines
+        """
+        words = text.split(' ')
+        lines = []
+        current_line = []
+        
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            bbox = font.getbbox(test_line)
+            width = bbox[2] - bbox[0]
+            
+            if width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                    current_line = [word]
+                else:
+                    # Single word too long, force it
+                    lines.append(word)
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        return lines if lines else [text]
     
     def render_3d_text(self, cv_image, text, position, z_depth=5.0):
         """
@@ -74,16 +112,24 @@ class Text3DRenderer:
         img_pil = Image.fromarray(cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB))
         x, y = position
         
-        # Calculate perspective scaling based on depth
-        # z_depth typically ranges from 5 (far/small) to 20 (near/large)
-        k_factor = self.params.get('scale_factor', 100.0)
-        scale_multiplier = z_depth / 10.0  # Normalize around 1.0
+        img_width = img_pil.width
+        img_height = img_pil.height
+        
+        # Calculate resolution-aware font size
+        # Base size scales with image width (640px = 24pt, 1920px = 72pt)
+        base_font_size = int((img_width / 640) * 24)
+        base_font_size = self.params.get('font_size', base_font_size)
+        
+        # Apply depth-based scaling
+        k_factor = self.params.get('scale_factor', 80.0)
+        scale_multiplier = z_depth / 10.0
         calculated_scale = k_factor * scale_multiplier
         
-        # Final font size with bounds
-        base_font_size = self.params.get('font_size', 48)
+        # Final font size with resolution-aware bounds
         final_font_size = int(base_font_size * calculated_scale / 100.0)
-        final_font_size = max(16, min(120, final_font_size))  # Clamp to readable range
+        min_size = max(12, int(img_width / 80))  # Minimum readable
+        max_size = max(60, int(img_width / 15))  # Maximum before too large
+        final_font_size = max(min_size, min(max_size, final_font_size))
         
         # Load font
         try:
@@ -91,18 +137,32 @@ class Text3DRenderer:
         except:
             font = ImageFont.load_default()
         
-        # Get text dimensions
-        bbox = font.getbbox(text)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
+        # Calculate max text width based on frame size
+        max_text_width_ratio = self.params.get('max_text_width_ratio', 0.6)
+        max_text_width = int(img_width * max_text_width_ratio)
         
-        # Adjust position to center text
-        x = x - text_width // 2
-        y = y - text_height // 2
+        # Wrap text to multiple lines
+        lines = self._wrap_text(text, font, max_text_width)
         
-        # Ensure text stays within bounds
-        x = max(10, min(img_pil.width - text_width - 10, x))
-        y = max(10, min(img_pil.height - text_height - 10, y))
+        # Calculate total text block dimensions
+        line_height = final_font_size + int(final_font_size * 0.3)
+        total_height = len(lines) * line_height
+        
+        # Get max line width
+        max_line_width = 0
+        for line in lines:
+            bbox = font.getbbox(line)
+            line_width = bbox[2] - bbox[0]
+            max_line_width = max(max_line_width, line_width)
+        
+        # Adjust position to center the text block
+        start_x = x - max_line_width // 2
+        start_y = y - total_height // 2
+        
+        # Ensure text block stays within bounds
+        margin = 20
+        start_x = max(margin, min(img_width - max_line_width - margin, start_x))
+        start_y = max(margin, min(img_height - total_height - margin, start_y))
         
         # Create overlay
         overlay = Image.new('RGBA', (img_pil.width, img_pil.height), (0, 0, 0, 0))
@@ -110,9 +170,9 @@ class Text3DRenderer:
         
         # Colors
         text_color = (
-            self.params.get('text_color_r', 255),
+            self.params.get('text_color_r', 0),
             self.params.get('text_color_g', 255),
-            self.params.get('text_color_b', 255),
+            self.params.get('text_color_b', 0),
             255
         )
         
@@ -124,13 +184,13 @@ class Text3DRenderer:
         )
         
         depth_color = (
-            self.params.get('depth_color_r', 128),
-            self.params.get('depth_color_g', 128),
-            self.params.get('depth_color_b', 128),
+            self.params.get('depth_color_r', 100),
+            self.params.get('depth_color_g', 100),
+            self.params.get('depth_color_b', 100),
             200
         )
         
-        # Calculate shadow offset based on depth and position
+        # Calculate shadow offset
         if self.params.get('auto_shadow_direction', True):
             shadow_x, shadow_y = self.calculate_auto_shadow_direction(
                 x, y, img_pil.width, img_pil.height, z_depth
@@ -139,36 +199,49 @@ class Text3DRenderer:
             shadow_x = self.params.get('shadow_offset_x', 5)
             shadow_y = self.params.get('shadow_offset_y', 5)
         
-        # Draw shadow
-        if self.params.get('enable_shadow', True):
-            draw.text((x + shadow_x, y + shadow_y), text, font=font, fill=shadow_color)
+        # Depth layers configuration
+        depth_layers = max(3, min(10, int(z_depth * 0.6)))
+        layer_step = max(1, int(2 * scale_multiplier))
         
-        # Draw depth layers (THIS IS THE KEY 3D EFFECT)
-        # More layers = more pronounced 3D effect
-        if self.params.get('enable_depth', True):
-            depth_layers = max(3, min(12, int(z_depth * 0.8)))  # Scale layers with depth
-            layer_step = max(1, int(3 * scale_multiplier))  # Adjust step size
+        # Outline width
+        outline_width = max(1, int(1.5 * scale_multiplier))
+        
+        # Render each line
+        current_y = start_y
+        
+        for line in lines:
+            # Get line width for centering
+            bbox = font.getbbox(line)
+            line_width = bbox[2] - bbox[0]
+            line_x = start_x + (max_line_width - line_width) // 2
             
-            for i in range(depth_layers, 0, -1):
-                depth_x = x - i * layer_step
-                depth_y = y - i * layer_step
-                depth_alpha = int(140 * (depth_layers - i + 1) / depth_layers)
-                layer_color = (depth_color[0], depth_color[1], depth_color[2], depth_alpha)
-                draw.text((depth_x, depth_y), text, font=font, fill=layer_color)
+            # Draw shadow
+            if self.params.get('enable_shadow', True):
+                draw.text((line_x + shadow_x, current_y + shadow_y), line, font=font, fill=shadow_color)
+            
+            # Draw depth layers
+            if self.params.get('enable_depth', True):
+                for i in range(depth_layers, 0, -1):
+                    depth_x = line_x - i * layer_step
+                    depth_y = current_y - i * layer_step
+                    depth_alpha = int(120 * (depth_layers - i + 1) / depth_layers)
+                    layer_color = (depth_color[0], depth_color[1], depth_color[2], depth_alpha)
+                    draw.text((depth_x, depth_y), line, font=font, fill=layer_color)
+            
+            # Draw outline
+            if self.params.get('enable_outline', True):
+                outline_color = (0, 0, 0, 255)
+                for dx in range(-outline_width, outline_width + 1):
+                    for dy in range(-outline_width, outline_width + 1):
+                        if dx != 0 or dy != 0:
+                            draw.text((line_x + dx, current_y + dy), line, font=font, fill=outline_color)
+            
+            # Draw main text
+            draw.text((line_x, current_y), line, font=font, fill=text_color)
+            
+            current_y += line_height
         
-        # Draw outline
-        if self.params.get('enable_outline', True):
-            outline_color = (0, 0, 0, 255)
-            outline_width = max(1, int(2 * scale_multiplier))
-            for dx in range(-outline_width, outline_width + 1):
-                for dy in range(-outline_width, outline_width + 1):
-                    if dx != 0 or dy != 0:
-                        draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
-        
-        # Draw main text with glow effect
-        draw.text((x, y), text, font=font, fill=text_color)
-        
-        # Apply blur to create depth-of-field effect (optional)
+        # Apply blur
         shadow_blur = self.params.get('shadow_blur', 0)
         if shadow_blur > 0:
             overlay = overlay.filter(ImageFilter.GaussianBlur(radius=shadow_blur))

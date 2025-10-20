@@ -167,9 +167,9 @@ socket.on('gemini_result', (result) => {
             y: result.position.y,
             z: result.position.z || 0.5  // Use stereo depth if available
         };
-        
+
         console.log(`Creating 3D text at normalized position: (${position.x.toFixed(3)}, ${position.y.toFixed(3)}, ${position.z.toFixed(3)})`);
-        
+
         create3DText(result.answer, position);
     }
 
