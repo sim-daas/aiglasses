@@ -30,7 +30,6 @@ from audio_manager import AudioManager
 from gemini_client import GeminiClient
 from web_server import WebServer
 from config import Config
-from text_3d_renderer import Text3DRenderer
 
 class AURAGlasses:
     def __init__(self, test_mode=False):
@@ -54,10 +53,6 @@ class AURAGlasses:
         # Initialize web server
         logger.info("Initializing web server...")
         self.server = WebServer(self.camera)
-        
-        # Initialize 3D text renderer
-        logger.info("Initializing 3D text renderer...")
-        self.text_renderer = Text3DRenderer()
         
         # State
         self.recording = False
@@ -233,61 +228,6 @@ class AURAGlasses:
             import traceback
             logger.error(traceback.print_exc())
     
-    def _draw_3d_text_overlay(self, frame, result):
-        """Draw TRUE 3D text overlay with depth layers"""
-        if not result:
-            return frame
-        
-        # Get frame dimensions
-        h, w = frame.shape[:2]
-        
-        # Map location to coordinates
-        location_map = {
-            'top-left': (int(w * 0.15), int(h * 0.15)),
-            'top-center': (int(w * 0.5), int(h * 0.15)),
-            'top-right': (int(w * 0.85), int(h * 0.15)),
-            'center-left': (int(w * 0.15), int(h * 0.5)),
-            'center': (int(w * 0.5), int(h * 0.5)),
-            'center-right': (int(w * 0.85), int(h * 0.5)),
-            'bottom-left': (int(w * 0.15), int(h * 0.85)),
-            'bottom-center': (int(w * 0.5), int(h * 0.85)),
-            'bottom-right': (int(w * 0.85), int(h * 0.85)),
-        }
-        
-        location = result.get('location', 'center')
-        x, y = location_map.get(location, (int(w * 0.5), int(h * 0.5)))
-        
-        # Get answer and object
-        answer = result['answer']
-        object_name = result['object']
-        depth_value = result.get('position', {}).get('z', 5.0) * 10  # Scale for effect
-        
-        # Render answer with 3D effect
-        frame = self.text_renderer.render_3d_text(
-            frame, 
-            answer, 
-            (x, y), 
-            z_depth=depth_value
-        )
-        
-        # Render object label below with smaller depth
-        label_text = f"[{object_name}]"
-        bbox = cv2.getTextSize(answer, cv2.FONT_HERSHEY_DUPLEX, 0.6, 2)[0]
-        label_y = y + bbox[1] + 30
-        
-        frame = self.text_renderer.render_3d_text(
-            frame,
-            label_text,
-            (x, label_y),
-            z_depth=depth_value * 0.5
-        )
-        
-        # Draw location indicator
-        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (x, y), 7, (255, 255, 255), 1)
-        
-        return frame
-    
     def run(self):
         """Run the main application"""
         # Start web server in separate thread
@@ -318,19 +258,10 @@ class AURAGlasses:
                 if frame_left is not None:
                     frame_count += 1
                     
-                    # Create copies for overlay
-                    display_left = frame_left.copy()
-                    display_right = frame_right.copy()
+                    # NO OVERLAY - just show raw stereo feed
+                    stereo_view = cv2.hconcat([frame_left, frame_right])
                     
-                    # Add overlay if we have results
-                    if self.current_result:
-                        display_left = self._draw_3d_text_overlay(display_left, self.current_result)
-                        display_right = self._draw_3d_text_overlay(display_right, self.current_result)
-                    
-                    # Show stereo view
-                    stereo_view = cv2.hconcat([display_left, display_right])
-                    
-                    # Add frame counter
+                    # Add frame counter only
                     cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     

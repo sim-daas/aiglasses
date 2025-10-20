@@ -6,7 +6,6 @@ import json
 import os
 import logging
 from config import Config
-from text_3d_renderer import Text3DRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +52,6 @@ class WebServer:
         
         self.camera_manager = camera_manager
         self.latest_result = None
-        self.show_overlay = True
-        
-        # Initialize 3D text renderer
-        self.text_renderer = Text3DRenderer()
         
         logger.info("Setting up Flask routes...")
         self._setup_routes()
@@ -67,13 +62,14 @@ class WebServer:
         logger.info("✅ Web server initialized")
     
     def _create_minimal_html(self, web_dir):
-        """Create a minimal HTML file for testing"""
+        """Create HTML with Three.js 3D text rendering"""
         html_content = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AURA AI Glasses</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
         body {
@@ -82,141 +78,256 @@ class WebServer:
             font-family: Arial, sans-serif;
             background: #000;
             color: #fff;
+            overflow: hidden;
         }
         #container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px;
+            position: relative;
+            width: 100vw;
+            height: 100vh;
         }
         #video-feed {
-            max-width: 90vw;
-            border: 2px solid #0f0;
-            margin: 20px 0;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        #three-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
         }
         #status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
             background: rgba(0, 0, 0, 0.8);
             padding: 15px;
             border-radius: 8px;
-            margin: 10px 0;
-            min-width: 300px;
+            z-index: 10;
         }
-        #answer {
-            font-size: 24px;
-            font-weight: bold;
-            color: #0f0;
-            margin: 20px 0;
-            padding: 20px;
-            background: rgba(0, 255, 0, 0.1);
-            border-radius: 10px;
-            min-height: 60px;
-            display: none;
-        }
-        #location-info {
-            background: rgba(0,255,0,0.2);
+        #info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
             padding: 10px;
-            margin: 10px 0;
             border-radius: 5px;
-            display: none;
-        }
-        .info {
+            font-size: 12px;
             color: #888;
-            font-size: 14px;
+            z-index: 10;
         }
     </style>
 </head>
 <body>
     <div id="container">
-        <h1>🤖 AURA AI Glasses</h1>
+        <img id="video-feed" src="/video_feed" alt="Camera Feed">
+        <canvas id="three-canvas"></canvas>
         
         <div id="status">
             <div id="status-text">Connecting...</div>
         </div>
         
-        <img id="video-feed" src="/video_feed" alt="Camera Feed">
-        
-        <div id="answer"></div>
-        
-        <div id="location-info">
-            <strong>Object:</strong> <span id="object-name"></span><br>
-            <strong>Location:</strong> <span id="object-location"></span>
-        </div>
-        
-        <div class="info">
-            <p>📝 Press 't' on Jetson to test (test mode)</p>
-            <p>🎥 Camera feed updates automatically</p>
+        <div id="info">
+            <p>📝 Press 't' on Jetson to test</p>
+            <p>🎥 3D text powered by Three.js</p>
         </div>
     </div>
     
     <script>
-        console.log('Starting Socket.IO initialization...');
+        // Three.js setup
+        let scene, camera, renderer;
+        let textMesh = null;
+        let labelMesh = null;
         
-        // Initialize Socket.IO
+        function initThree() {
+            scene = new THREE.Scene();
+            
+            const canvas = document.getElementById('three-canvas');
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+            
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0);
+            
+            // Lighting for 3D effect
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 5, 5);
+            scene.add(directionalLight);
+            
+            animate();
+            console.log('✅ Three.js initialized');
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Subtle rotation for 3D effect
+            if (textMesh) {
+                textMesh.rotation.y = Math.sin(Date.now() * 0.0005) * 0.05;
+            }
+            if (labelMesh) {
+                labelMesh.rotation.y = Math.sin(Date.now() * 0.0005) * 0.05;
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        function create3DText(text, label, position) {
+            // Remove old text
+            if (textMesh) {
+                scene.remove(textMesh);
+                textMesh.geometry.dispose();
+                textMesh.material.dispose();
+            }
+            if (labelMesh) {
+                scene.remove(labelMesh);
+                labelMesh.geometry.dispose();
+                labelMesh.material.dispose();
+            }
+            
+            // Create text canvas
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 1024;
+            canvas.height = 512;
+            
+            // Draw answer text with 3D-like effects
+            context.fillStyle = '#000000';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Shadow layers for depth
+            for (let i = 8; i > 0; i--) {
+                context.fillStyle = `rgba(100, 100, 100, ${0.3 * (8 - i) / 8})`;
+                context.font = 'bold 64px Arial';
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillText(text, 512 - i * 2, 200 - i * 2);
+            }
+            
+            // Main text
+            context.shadowColor = 'rgba(0, 0, 0, 0.8)';
+            context.shadowBlur = 15;
+            context.shadowOffsetX = 5;
+            context.shadowOffsetY = 5;
+            context.fillStyle = '#00ff00';
+            context.font = 'bold 64px Arial';
+            context.fillText(text, 512, 200);
+            
+            // Label text
+            context.shadowBlur = 5;
+            context.fillStyle = '#00ccff';
+            context.font = 'bold 32px Arial';
+            context.fillText(`[${label}]`, 512, 280);
+            
+            // Create texture
+            const texture = new THREE.CanvasTexture(canvas);
+            
+            // Create material with proper 3D properties
+            const material = new THREE.MeshPhongMaterial({
+                map: texture,
+                transparent: true,
+                side: THREE.DoubleSide,
+                shininess: 30,
+                specular: 0x333333
+            });
+            
+            // Create geometry with depth
+            const geometry = new THREE.BoxGeometry(6, 3, 0.3);
+            
+            // Create mesh
+            textMesh = new THREE.Mesh(geometry, material);
+            
+            // Position based on location and depth
+            const locationMap = {
+                'top-left': [-3, 2, 0],
+                'top-center': [0, 2, 0],
+                'top-right': [3, 2, 0],
+                'center-left': [-3, 0, 0],
+                'center': [0, 0, 0],
+                'center-right': [3, 0, 0],
+                'bottom-left': [-3, -2, 0],
+                'bottom-center': [0, -2, 0],
+                'bottom-right': [3, -2, 0]
+            };
+            
+            const pos = locationMap[position.location] || [0, 0, 0];
+            const zDepth = -position.z * 5 || -2;
+            
+            textMesh.position.set(pos[0], pos[1], zDepth);
+            
+            scene.add(textMesh);
+            
+            console.log(`📝 3D text created at location: ${position.location}`);
+        }
+        
+        // Socket.IO setup
         const socket = io(window.location.origin, {
             path: '/socket.io',
             transports: ['polling', 'websocket'],
             upgrade: true,
-            reconnection: true,
-            reconnectionDelay: 1000,
-            reconnectionAttempts: 10,
-            timeout: 20000
+            reconnection: true
         });
         
-        console.log('Socket.IO object created');
-        
         socket.on('connect', () => {
-            console.log('✅ Connected to server!');
-            console.log('Socket ID:', socket.id);
-            console.log('Transport:', socket.io.engine.transport.name);
-            
+            console.log('✅ Connected to server');
             document.getElementById('status-text').textContent = '✅ Connected';
             document.getElementById('status-text').style.color = '#0f0';
         });
         
-        socket.on('connect_error', (error) => {
-            console.error('❌ Connection error:', error);
-            document.getElementById('status-text').textContent = '❌ Connection Error: ' + error.message;
-            document.getElementById('status-text').style.color = '#f00';
-        });
-        
         socket.on('disconnect', (reason) => {
             console.log('❌ Disconnected:', reason);
-            document.getElementById('status-text').textContent = '❌ Disconnected: ' + reason;
+            document.getElementById('status-text').textContent = '❌ Disconnected';
             document.getElementById('status-text').style.color = '#f00';
         });
         
         socket.on('status', (data) => {
-            console.log('📡 Status:', data);
+            console.log('📡 Status:', data.message);
             document.getElementById('status-text').textContent = data.message;
         });
         
         socket.on('gemini_result', (result) => {
             console.log('📡 Gemini Result:', result);
             
-            // Show answer
-            const answerDiv = document.getElementById('answer');
-            answerDiv.textContent = result.answer;
-            answerDiv.style.display = 'block';
-            
-            // Show location info
-            document.getElementById('object-name').textContent = result.object;
-            document.getElementById('object-location').textContent = result.location || result.position.description;
-            document.getElementById('location-info').style.display = 'block';
-            
             // Update status
             document.getElementById('status-text').innerHTML = 
-                `Q: ${result.transcription}`;
+                `Q: ${result.transcription}<br>A: ${result.answer}`;
             
-            // Hide after 10 seconds
+            // Create 3D text
+            create3DText(result.answer, result.object, result.position);
+            
+            // Auto-hide after 10 seconds
             setTimeout(() => {
-                answerDiv.style.display = 'none';
-                document.getElementById('location-info').style.display = 'none';
+                if (textMesh) {
+                    scene.remove(textMesh);
+                    textMesh = null;
+                }
+                if (labelMesh) {
+                    scene.remove(labelMesh);
+                    labelMesh = null;
+                }
             }, 10000);
         });
         
-        // Debug: Log all events
-        socket.onAny((eventName, ...args) => {
-            console.log('Event received:', eventName, args);
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Initialize
+        window.addEventListener('load', () => {
+            initThree();
+            console.log('🚀 AURA AI Glasses loaded');
         });
     </script>
 </body>
@@ -225,7 +336,7 @@ class WebServer:
         with open(os.path.join(web_dir, 'index.html'), 'w') as f:
             f.write(html_content)
         
-        logger.info(f"✅ Created minimal index.html")
+        logger.info(f"✅ Created index.html with Three.js")
     
     def _setup_routes(self):
         """Setup Flask routes"""
@@ -247,68 +358,13 @@ class WebServer:
                 return jsonify(self.latest_result)
             return jsonify({"status": "no_data"})
     
-    def _draw_3d_text_overlay(self, frame, result):
-        """Draw 3D text overlay on web stream"""
-        if not result or not self.show_overlay:
-            return frame
-        
-        # Get frame dimensions
-        h, w = frame.shape[:2]
-        
-        # Location mapping
-        location_map = {
-            'top-left': (int(w * 0.15), int(h * 0.15)),
-            'top-center': (int(w * 0.5), int(h * 0.15)),
-            'top-right': (int(w * 0.85), int(h * 0.15)),
-            'center-left': (int(w * 0.15), int(h * 0.5)),
-            'center': (int(w * 0.5), int(h * 0.5)),
-            'center-right': (int(w * 0.85), int(h * 0.5)),
-            'bottom-left': (int(w * 0.15), int(h * 0.85)),
-            'bottom-center': (int(w * 0.5), int(h * 0.85)),
-            'bottom-right': (int(w * 0.85), int(h * 0.85)),
-        }
-        
-        location = result.get('location', 'center')
-        x, y = location_map.get(location, (int(w * 0.5), int(h * 0.5)))
-        
-        # Get text and depth
-        answer = result['answer']
-        object_name = result['object']
-        depth_value = result.get('position', {}).get('z', 5.0) * 10
-        
-        # Render 3D text
-        frame = self.text_renderer.render_3d_text(
-            frame,
-            answer,
-            (x, y),
-            z_depth=depth_value
-        )
-        
-        # Render object label
-        label_text = f"[{object_name}]"
-        frame = self.text_renderer.render_3d_text(
-            frame,
-            label_text,
-            (x, y + 40),
-            z_depth=depth_value * 0.5
-        )
-        
-        # Location indicator
-        cv2.circle(frame, (x, y), 3, (0, 255, 0), -1)
-        cv2.circle(frame, (x, y), 5, (255, 255, 255), 1)
-        
-        return frame
-    
     def _generate_frames(self):
-        """Generate JPEG frames for MJPEG stream"""
+        """Generate JPEG frames - NO OVERLAY"""
         while True:
             frame_left, frame_right, depth_map = self.camera_manager.get_frames()
             
             if frame_left is not None:
-                # Add overlay if we have results
-                if self.latest_result:
-                    frame_left = self._draw_3d_text_overlay(frame_left, self.latest_result)
-                
+                # NO OVERLAY - just send raw frame
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame_left, 
                                           [cv2.IMWRITE_JPEG_QUALITY, 85])
