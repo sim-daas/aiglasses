@@ -23,63 +23,53 @@
             position: relative;
             width: 100vw;
             height: 100vh;
+            display: flex;
+            flex-direction: row;
         }
 
-        /* Main clean feed for AR overlays */
-        #feed {
-            position: absolute;
-            inset: 0;
+        /* Split-screen layout - both feeds equal size */
+        .feed-container {
+            position: relative;
+            width: 50%;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .feed-container img {
             width: 100%;
             height: 100%;
             object-fit: contain;
             filter: brightness(0.95);
         }
 
-        /* Picture-in-Picture gesture keyboard feed */
-        #keyboard-feed {
+        .feed-label {
             position: absolute;
-            bottom: 20px;
-            right: 20px;
-            width: 320px;
-            height: 240px;
-            border: 2px solid #0f0;
-            border-radius: 8px;
-            z-index: 50;
-            object-fit: cover;
-            box-shadow: 0 4px 20px rgba(0, 255, 0, 0.3);
-        }
-
-        #keyboard-feed.hidden {
-            display: none;
-        }
-
-        /* Toggle button for keyboard feed */
-        #toggle-keyboard {
-            position: absolute;
-            bottom: 270px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.9);
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 1px solid rgba(0, 255, 0, 0.5);
-            color: #0f0;
-            cursor: pointer;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 5px 10px;
+            border-radius: 5px;
             font-size: 12px;
-            z-index: 51;
+            color: #0f0;
+            border: 1px solid rgba(0, 255, 0, 0.5);
+            z-index: 10;
         }
 
-        #toggle-keyboard:hover {
-            background: rgba(0, 255, 0, 0.1);
-        }
-
-        /* Three.js canvas for depth occlusion */
+        /* Three.js canvas for depth occlusion (only on AR feed) */
         canvas {
             position: absolute;
             inset: 0;
             pointer-events: auto;
         }
 
-        /* 3D text card overlay with proper transform support */
+        #cards {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            perspective: 900px;
+            transform-style: preserve-3d;
+        }
+
         .card3d {
             position: absolute;
             left: 0;
@@ -99,25 +89,17 @@
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
         }
 
-        #cards {
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            perspective: 900px;
-            transform-style: preserve-3d;
-        }
-
-        /* Status overlay */
         #status {
             position: absolute;
-            top: 20px;
-            right: 20px;
+            top: 50px;
+            left: 10px;
             background: rgba(0, 0, 0, 0.8);
             padding: 10px 15px;
             border-radius: 8px;
             border: 1px solid rgba(0, 255, 0, 0.5);
             font-size: 14px;
             z-index: 100;
+            max-width: 45%;
         }
 
         .status-connected {
@@ -128,50 +110,30 @@
             color: #f00;
         }
 
-        /* HUD controls */
-        #hud {
+        #depth-info {
             position: absolute;
-            top: 12px;
-            left: 12px;
-            display: flex;
-            gap: 8px;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            font-size: 12px;
             z-index: 100;
+            color: #0f0;
         }
 
-        #hud input {
-            padding: 8px 10px;
-            border-radius: 8px;
-            border: 1px solid #333;
-            background: #111;
-            color: #eee;
-            font-size: 14px;
-        }
-
-        #ask {
-            padding: 8px 12px;
-            border-radius: 8px;
-            border: 1px solid #3a3;
-            background: #0b3;
-            color: #fff;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        #ask:hover {
-            background: #0d5;
-        }
-
-        /* Control panel */
         #controls {
             position: absolute;
             bottom: 20px;
-            left: 20px;
+            left: 10px;
             background: rgba(0, 0, 0, 0.9);
             padding: 15px;
             border-radius: 8px;
             border: 1px solid rgba(0, 255, 0, 0.3);
-            min-width: 300px;
-            max-height: 80vh;
+            min-width: 250px;
+            max-width: 45%;
+            max-height: 70vh;
             overflow-y: auto;
             z-index: 100;
             font-size: 12px;
@@ -184,14 +146,14 @@
         }
 
         .control-group {
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
 
         .control-group label {
             display: block;
             margin-bottom: 3px;
             color: #aaa;
-            font-size: 11px;
+            font-size: 10px;
         }
 
         .control-group input[type="range"] {
@@ -204,8 +166,8 @@
 
         .control-group input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
-            width: 12px;
-            height: 12px;
+            width: 10px;
+            height: 10px;
             background: #0f0;
             border-radius: 50%;
             cursor: pointer;
@@ -220,7 +182,7 @@
 
         .control-group input[type="color"] {
             width: 100%;
-            height: 30px;
+            height: 25px;
             border: 1px solid #555;
             background: #222;
             cursor: pointer;
@@ -229,14 +191,14 @@
         #toggle-controls {
             position: absolute;
             bottom: 20px;
-            left: 340px;
+            left: 270px;
             background: rgba(0, 0, 0, 0.9);
-            padding: 8px 12px;
+            padding: 6px 10px;
             border-radius: 8px;
             border: 1px solid rgba(0, 255, 0, 0.3);
             color: #0f0;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 11px;
             z-index: 101;
         }
 
@@ -248,118 +210,125 @@
             display: none;
         }
 
-        /* Depth info panel */
-        #depth-info {
+        /* Divider between feeds */
+        .divider {
             position: absolute;
-            top: 60px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid rgba(0, 255, 0, 0.3);
-            font-size: 12px;
-            z-index: 100;
-            color: #0f0;
+            left: 50%;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background: linear-gradient(to bottom,
+                    transparent,
+                    rgba(0, 255, 0, 0.5) 20%,
+                    rgba(0, 255, 0, 0.5) 80%,
+                    transparent);
+            z-index: 5;
         }
     </style>
 </head>
 
 <body>
     <div id="wrap">
-        <!-- Main clean feed for AR visualization -->
-        <img id="feed" src="/video_feed" alt="Camera Feed" />
+        <!-- Left side: AR Visualization Feed (clean) -->
+        <div class="feed-container" id="ar-container">
+            <span class="feed-label">AR Visualization</span>
+            <img id="feed" src="/video_feed" alt="AR Feed" />
 
-        <!-- Picture-in-Picture gesture keyboard feed -->
-        <img id="keyboard-feed" src="/keyboard_feed" alt="Gesture Keyboard" />
+            <!-- Three.js canvas for 3D overlays -->
+            <div id="cards"></div>
 
-        <button id="toggle-keyboard">Toggle Keyboard</button>
+            <div id="status" class="status-disconnected">Connecting...</div>
 
-        <!-- Three.js canvas will be inserted here -->
+            <div id="depth-info">
+                Depth: <span id="depth-value">--</span> cm<br>
+                3D Mode: <span id="mode-3d">Loading...</span>
+            </div>
 
-        <div id="cards"></div>
+            <button id="toggle-controls">Toggle Controls</button>
 
-        <div id="status" class="status-disconnected">Connecting...</div>
+            <div id="controls" class="controls-hidden">
+                <h3>3D Overlay Settings</h3>
 
-        <div id="depth-info">
-            Depth: <span id="depth-value">--</span> cm<br>
-            3D Mode: <span id="mode-3d">Loading...</span>
+                <div class="control-group">
+                    <label>Shadow Blur <span class="value" id="val-shadow-blur">0</span>px</label>
+                    <input type="range" id="shadow-blur" min="0" max="30" value="0" step="1">
+                </div>
+
+                <div class="control-group">
+                    <label>Shadow Spread <span class="value" id="val-shadow-spread">0</span>px</label>
+                    <input type="range" id="shadow-spread" min="0" max="50" value="0" step="1">
+                </div>
+
+                <div class="control-group">
+                    <label>Box Shadow <span class="value" id="val-box-shadow">7</span>px</label>
+                    <input type="range" id="box-shadow" min="0" max="60" value="7" step="1">
+                </div>
+
+                <div class="control-group">
+                    <label>BG Opacity <span class="value" id="val-bg-opacity">0.35</span></label>
+                    <input type="range" id="bg-opacity" min="0" max="100" value="35" step="1">
+                </div>
+
+                <div class="control-group">
+                    <label>Border Opacity <span class="value" id="val-border-opacity">0.23</span></label>
+                    <input type="range" id="border-opacity" min="0" max="100" value="23" step="1">
+                </div>
+
+                <div class="control-group">
+                    <label>Border Width <span class="value" id="val-border-width">0</span>px</label>
+                    <input type="range" id="border-width" min="0" max="10" value="0" step="1">
+                </div>
+
+                <div class="control-group">
+                    <label>Text Color</label>
+                    <input type="color" id="text-color" value="#00ff88">
+                </div>
+
+                <div class="control-group">
+                    <label>Border Color</label>
+                    <input type="color" id="border-color" value="#00ffa0">
+                </div>
+
+                <div class="control-group">
+                    <label>Font Size <span class="value" id="val-font-size">22</span>px</label>
+                    <input type="range" id="font-size" min="12" max="40" value="22" step="1">
+                </div>
+
+                <div class="control-group">
+                    <label>Perspective <span class="value" id="val-perspective">900</span>px</label>
+                    <input type="range" id="perspective" min="300" max="2000" value="900" step="50">
+                </div>
+
+                <div class="control-group">
+                    <label>
+                        <input type="checkbox" id="enable-depth-occlusion" checked>
+                        Depth Occlusion
+                    </label>
+                </div>
+            </div>
         </div>
 
-        <button id="toggle-controls">Toggle Controls</button>
+        <!-- Divider -->
+        <div class="divider"></div>
 
-        <div id="controls">
-            <h3>3D Overlay Settings</h3>
-
-            <div class="control-group">
-                <label>Text Shadow Blur <span class="value" id="val-shadow-blur">0</span>px</label>
-                <input type="range" id="shadow-blur" min="0" max="30" value="0" step="1">
-            </div>
-
-            <div class="control-group">
-                <label>Text Shadow Spread <span class="value" id="val-shadow-spread">0</span>px</label>
-                <input type="range" id="shadow-spread" min="0" max="50" value="0" step="1">
-            </div>
-
-            <div class="control-group">
-                <label>Box Shadow Depth <span class="value" id="val-box-shadow">7</span>px</label>
-                <input type="range" id="box-shadow" min="0" max="60" value="7" step="1">
-            </div>
-
-            <div class="control-group">
-                <label>Background Opacity <span class="value" id="val-bg-opacity">0.35</span></label>
-                <input type="range" id="bg-opacity" min="0" max="100" value="35" step="1">
-            </div>
-
-            <div class="control-group">
-                <label>Border Opacity <span class="value" id="val-border-opacity">0.23</span></label>
-                <input type="range" id="border-opacity" min="0" max="100" value="23" step="1">
-            </div>
-
-            <div class="control-group">
-                <label>Border Width <span class="value" id="val-border-width">0</span>px</label>
-                <input type="range" id="border-width" min="0" max="10" value="0" step="1">
-            </div>
-
-            <div class="control-group">
-                <label>Text Color</label>
-                <input type="color" id="text-color" value="#00ff88">
-            </div>
-
-            <div class="control-group">
-                <label>Border Color</label>
-                <input type="color" id="border-color" value="#00ffa0">
-            </div>
-
-            <div class="control-group">
-                <label>Font Size <span class="value" id="val-font-size">22</span>px</label>
-                <input type="range" id="font-size" min="12" max="40" value="22" step="1">
-            </div>
-
-            <div class="control-group">
-                <label>Perspective <span class="value" id="val-perspective">900</span>px</label>
-                <input type="range" id="perspective" min="300" max="2000" value="900" step="50">
-            </div>
-
-            <div class="control-group">
-                <label>
-                    <input type="checkbox" id="enable-depth-occlusion" checked>
-                    Enable Depth Occlusion
-                </label>
-            </div>
+        <!-- Right side: Gesture Keyboard Feed -->
+        <div class="feed-container" id="keyboard-container">
+            <span class="feed-label">Gesture Keyboard</span>
+            <img id="keyboard-feed" src="/keyboard_feed" alt="Gesture Keyboard" />
         </div>
     </div>
 
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
     <script>
-        console.log('🚀 AURA AI Glasses - 3D Depth-Aware Overlay with Separate Keyboard Feed');
+        console.log('🚀 AURA AI Glasses - Split-Screen: AR + Keyboard');
 
         // Toggle keyboard feed visibility
         document.getElementById('toggle-keyboard').addEventListener('click', () => {
             document.getElementById('keyboard-feed').classList.toggle('hidden');
         });
 
-        const wrap = document.getElementById('wrap');
+        const wrap = document.getElementById('ar-container');  // Three.js on AR side only
         const feed = document.getElementById('feed');
         const cards = document.getElementById('cards');
         const status = document.getElementById('status');
@@ -800,7 +769,7 @@
 
         // Initialize controls and start render loop
         setupControls();
-        console.log('✅ 3D Depth-Aware Overlay system initialized');
+        console.log('✅ Split-screen initialized: 50/50 AR + Keyboard feeds');
     </script>
 </body>
 
