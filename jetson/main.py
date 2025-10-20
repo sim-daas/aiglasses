@@ -102,7 +102,7 @@ class AURAGlasses:
             logger.info(f"✅ Frame saved to: {image_file.name}")
             
             # Hardcoded test query - CHANGED
-            test_query = "What is the capacity of the water bottle?"
+            test_query = "What is the screen size of the monitor?"
             logger.info(f"Step 3/6: Using test query: '{test_query}'")
             
             # Process with Gemini

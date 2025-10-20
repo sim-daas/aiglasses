@@ -6,13 +6,13 @@ load_dotenv()
 class Config:
     # Camera settings - Single stereo camera outputting side-by-side frames
     CAMERA_DEVICE = "/dev/video0"  # Single device with stereo output
-    CAMERA_WIDTH = 640   # Full width (both cameras side-by-side)
-    CAMERA_HEIGHT = 240  # Height
+    CAMERA_WIDTH = 1280   # Full width (both cameras side-by-side) - DOUBLED from 640
+    CAMERA_HEIGHT = 480  # Height - DOUBLED from 240
     CAMERA_FPS = 30
     
     # Individual camera dimensions (half of full width)
-    SINGLE_CAM_WIDTH = 320   # Each camera is 320 pixels wide
-    SINGLE_CAM_HEIGHT = 240  # Same height
+    SINGLE_CAM_WIDTH = 640   # Each camera is 640 pixels wide - DOUBLED from 320
+    SINGLE_CAM_HEIGHT = 480  # Same height - DOUBLED from 240
     
     # Audio settings
     AUDIO_RATE = 16000
