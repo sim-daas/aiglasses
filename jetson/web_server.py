@@ -142,7 +142,6 @@ class WebServer:
         // Three.js setup
         let scene, camera, renderer;
         let textMesh = null;
-        let labelMesh = null;
         
         function initThree() {
             scene = new THREE.Scene();
@@ -172,61 +171,87 @@ class WebServer:
             
             // Subtle rotation for 3D effect
             if (textMesh) {
-                textMesh.rotation.y = Math.sin(Date.now() * 0.0005) * 0.05;
-            }
-            if (labelMesh) {
-                labelMesh.rotation.y = Math.sin(Date.now() * 0.0005) * 0.05;
+                textMesh.rotation.y = Math.sin(Date.now() * 0.0005) * 0.1;
             }
             
             renderer.render(scene, camera);
         }
         
-        function create3DText(text, label, position) {
+        function create3DText(result) {
+            console.log('Creating 3D text from result:', result);
+            
             // Remove old text
             if (textMesh) {
                 scene.remove(textMesh);
                 textMesh.geometry.dispose();
                 textMesh.material.dispose();
             }
-            if (labelMesh) {
-                scene.remove(labelMesh);
-                labelMesh.geometry.dispose();
-                labelMesh.material.dispose();
-            }
             
-            // Create text canvas
+            const text = result.answer;
+            const label = result.object;
+            const location = result.location || 'center';
+            
+            // Create text canvas with higher resolution
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
-            canvas.width = 1024;
-            canvas.height = 512;
+            canvas.width = 2048;
+            canvas.height = 1024;
             
-            // Draw answer text with 3D-like effects
-            context.fillStyle = '#000000';
+            // Clear canvas
+            context.fillStyle = 'rgba(0, 0, 0, 0)';
             context.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Shadow layers for depth
-            for (let i = 8; i > 0; i--) {
-                context.fillStyle = `rgba(100, 100, 100, ${0.3 * (8 - i) / 8})`;
-                context.font = 'bold 64px Arial';
-                context.textAlign = 'center';
-                context.textBaseline = 'middle';
-                context.fillText(text, 512 - i * 2, 200 - i * 2);
+            // Word wrap
+            const maxWidth = 1800;
+            const words = text.split(' ');
+            const lines = [];
+            let currentLine = words[0];
+            
+            context.font = 'bold 120px Arial';
+            for (let i = 1; i < words.length; i++) {
+                const testLine = currentLine + ' ' + words[i];
+                const metrics = context.measureText(testLine);
+                if (metrics.width > maxWidth) {
+                    lines.push(currentLine);
+                    currentLine = words[i];
+                } else {
+                    currentLine = testLine;
+                }
+            }
+            lines.push(currentLine);
+            
+            // Draw depth layers for 3D effect
+            const layerCount = 8;
+            let yPos = 400;
+            const lineHeight = 140;
+            
+            for (let line of lines) {
+                // Depth layers
+                for (let i = layerCount; i > 0; i--) {
+                    context.fillStyle = `rgba(80, 80, 80, ${0.4 * (layerCount - i) / layerCount})`;
+                    context.font = 'bold 120px Arial';
+                    context.textAlign = 'center';
+                    context.textBaseline = 'middle';
+                    context.fillText(line, 1024 - i * 3, yPos - i * 3);
+                }
+                
+                // Main text with glow
+                context.shadowColor = 'rgba(0, 255, 0, 0.8)';
+                context.shadowBlur = 20;
+                context.shadowOffsetX = 0;
+                context.shadowOffsetY = 0;
+                context.fillStyle = '#00ff00';
+                context.font = 'bold 120px Arial';
+                context.fillText(line, 1024, yPos);
+                
+                yPos += lineHeight;
             }
             
-            // Main text
-            context.shadowColor = 'rgba(0, 0, 0, 0.8)';
-            context.shadowBlur = 15;
-            context.shadowOffsetX = 5;
-            context.shadowOffsetY = 5;
-            context.fillStyle = '#00ff00';
-            context.font = 'bold 64px Arial';
-            context.fillText(text, 512, 200);
-            
-            // Label text
-            context.shadowBlur = 5;
+            // Label
+            context.shadowBlur = 10;
             context.fillStyle = '#00ccff';
-            context.font = 'bold 32px Arial';
-            context.fillText(`[${label}]`, 512, 280);
+            context.font = 'bold 60px Arial';
+            context.fillText(`[${label}]`, 1024, yPos + 40);
             
             // Create texture
             const texture = new THREE.CanvasTexture(canvas);
@@ -236,37 +261,39 @@ class WebServer:
                 map: texture,
                 transparent: true,
                 side: THREE.DoubleSide,
-                shininess: 30,
-                specular: 0x333333
+                shininess: 60,
+                specular: 0x555555,
+                emissive: 0x002200
             });
             
-            // Create geometry with depth
-            const geometry = new THREE.BoxGeometry(6, 3, 0.3);
+            // Create geometry with actual depth
+            const geometry = new THREE.BoxGeometry(8, 4, 0.5);
             
             // Create mesh
             textMesh = new THREE.Mesh(geometry, material);
             
-            // Position based on location and depth
+            // Position based on location
             const locationMap = {
-                'top-left': [-3, 2, 0],
-                'top-center': [0, 2, 0],
-                'top-right': [3, 2, 0],
-                'center-left': [-3, 0, 0],
-                'center': [0, 0, 0],
-                'center-right': [3, 0, 0],
-                'bottom-left': [-3, -2, 0],
-                'bottom-center': [0, -2, 0],
-                'bottom-right': [3, -2, 0]
+                'top-left': [-4, 2.5, -3],
+                'top-center': [0, 2.5, -3],
+                'top-right': [4, 2.5, -3],
+                'center-left': [-4, 0, -3],
+                'center': [0, 0, -3],
+                'center-right': [4, 0, -3],
+                'bottom-left': [-4, -2.5, -3],
+                'bottom-center': [0, -2.5, -3],
+                'bottom-right': [4, -2.5, -3]
             };
             
-            const pos = locationMap[position.location] || [0, 0, 0];
-            const zDepth = -position.z * 5 || -2;
+            const pos = locationMap[location] || [0, 0, -3];
+            const depth = result.position && result.position.z ? result.position.z : 0.5;
+            const zPos = pos[2] - (depth * 3);
             
-            textMesh.position.set(pos[0], pos[1], zDepth);
+            textMesh.position.set(pos[0], pos[1], zPos);
             
             scene.add(textMesh);
             
-            console.log(`📝 3D text created at location: ${position.location}`);
+            console.log(`📝 3D text created at location: ${location}, z: ${zPos}`);
         }
         
         // Socket.IO setup
@@ -295,26 +322,35 @@ class WebServer:
         });
         
         socket.on('gemini_result', (result) => {
-            console.log('📡 Gemini Result:', result);
+            console.log('📡 Gemini Result received:', result);
             
             // Update status
             document.getElementById('status-text').innerHTML = 
-                `Q: ${result.transcription}<br>A: ${result.answer}`;
+                `Q: ${result.transcription}<br>A: ${result.answer}<br>Location: ${result.location}`;
             
             // Create 3D text
-            create3DText(result.answer, result.object, result.position);
+            try {
+                create3DText(result);
+                console.log('✅ 3D text created successfully');
+            } catch (error) {
+                console.error('❌ Error creating 3D text:', error);
+            }
             
             // Auto-hide after 10 seconds
             setTimeout(() => {
                 if (textMesh) {
                     scene.remove(textMesh);
+                    textMesh.geometry.dispose();
+                    textMesh.material.dispose();
                     textMesh = null;
-                }
-                if (labelMesh) {
-                    scene.remove(labelMesh);
-                    labelMesh = null;
+                    console.log('🗑️ 3D text removed');
                 }
             }, 10000);
+        });
+        
+        // Debug: Log all events
+        socket.onAny((eventName, ...args) => {
+            console.log('📨 Socket event:', eventName, args);
         });
         
         // Handle window resize
