@@ -506,63 +506,19 @@ class WebServer:
         }
         return location_map.get(location.lower(), (int(frame_width * 0.5), int(frame_height * 0.5)))
     
-    def _draw_3d_text_overlay(self, frame, result):
-        """Draw 3D text overlay on web stream"""
-        if not result:
-            return frame
-        
-        h, w = frame.shape[:2]
-        
-        # Get location from Gemini
-        location = result.get('location', 'center')
-        x, y = self._map_location_to_position(location, w, h)
-        
-        # Get text and depth
-        answer = result['answer']
-        object_name = result['object']
-        depth_normalized = result.get('position', {}).get('z', 0.5)
-        
-        # Convert depth to z_depth (inverse for proper scaling)
-        z_depth = 20.0 - (depth_normalized * 15.0)
-        
-        # Render 3D text
-        frame = self.text_renderer.render_3d_text(
-            frame,
-            answer,
-            (x, y),
-            z_depth=z_depth
-        )
-        
-        # Render object label
-        label_offset = int(h * 0.08)
-        label_y = min(y + label_offset, h - 50)
-        frame = self.text_renderer.render_3d_text(
-            frame,
-            f"[{object_name}]",
-            (x, label_y),
-            z_depth=z_depth * 0.5
-        )
-        
-        # Location indicator
-        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (x, y), 8, (255, 255, 255), 1)
-        
-        return frame
-    
     def _generate_frames(self):
-        """Generate JPEG frames with 3D text overlay"""
+        """Generate JPEG frames WITHOUT text overlay"""
         while True:
-            frame_left, frame_right, depth_map = self.camera_manager.get_frames();
+            frame_left, frame_right, depth_map = self.camera_manager.get_frames()
             
             if frame_left is not None:
-                # Add 3D text overlay if we have results
-                if self.latest_result:
-                    frame_left = self._draw_3d_text_overlay(frame_left, self.latest_result);
+                # NO text overlay - send clean frame
+                # The HTML/CSS overlay will handle all text rendering
                 
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame_left, 
-                                          [cv2.IMWRITE_JPEG_QUALITY, 85]);
-                frame_bytes = buffer.tobytes();
+                                          [cv2.IMWRITE_JPEG_QUALITY, 85])
+                frame_bytes = buffer.tobytes()
                 
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n');
