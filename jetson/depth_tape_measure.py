@@ -34,6 +34,11 @@ class DepthTapeMeasure:
         self.arrow_at = None
         self.depth_map = None
         
+        # Depth smoothing
+        self.depth_history = []
+        self.depth_history_size = 10
+        self.smoothed_center_depth = 1.0
+        
         # Stereo matcher
         self.stereo = self._create_stereo_matcher()
         
@@ -208,3 +213,57 @@ class DepthTapeMeasure:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 0), 2, cv2.LINE_AA)
         
         return overlay
+    
+    def get_smoothed_center_depth(self):
+        """Get smoothed center depth for stable scaling"""
+        center_depth = self.get_depth_at_point(self.cx, self.cy, radius=12)
+        
+        if np.isfinite(center_depth) and center_depth > 0:
+            self.depth_history.append(center_depth)
+            if len(self.depth_history) > self.depth_history_size:
+                self.depth_history.pop(0)
+            
+            # Use median for robustness
+            if self.depth_history:
+                sorted_depths = sorted(self.depth_history)
+                self.smoothed_center_depth = sorted_depths[len(sorted_depths) // 2]
+        
+        return self.smoothed_center_depth
+    
+    def get_depth_grid(self, grid_width=32, grid_height=24):
+        """
+        Get downsampled depth grid for web overlay
+        
+        Args:
+            grid_width: Grid width
+            grid_height: Grid height
+            
+        Returns:
+            dict with depth grid data
+        """
+        if self.depth_map is None:
+            return None
+        
+        # Downsample depth map
+        step_x = self.w // grid_width
+        step_y = self.h // grid_height
+        
+        grid = []
+        for y in range(grid_height):
+            for x in range(grid_width):
+                px = min(x * step_x, self.w - 1)
+                py = min(y * step_y, self.h - 1)
+                depth = self.get_depth_at_point(px, py, radius=3)
+                grid.append(depth if np.isfinite(depth) else 6.0)
+        
+        return {
+            'w': self.w,
+            'h': self.h,
+            'gw': grid_width,
+            'gh': grid_height,
+            'fx': self.focal_px,
+            'fy': self.focal_px,
+            'cx': self.cx,
+            'cy': self.cy,
+            'z': grid
+        }

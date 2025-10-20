@@ -56,9 +56,19 @@ class AURAGlasses:
         self.camera.initialize()
         self.camera.start()
         
-        # Initialize web server
+        # Initialize tape measure if requested
+        if use_tape_measure:
+            logger.info("Initializing AR tape measure...")
+            self.tape_measure = DepthTapeMeasure(
+                baseline_mm=65,
+                focal_px=900,
+                frame_width=Config.SINGLE_CAM_WIDTH,
+                frame_height=Config.SINGLE_CAM_HEIGHT
+            )
+        
+        # Initialize web server with tape measure reference
         logger.info("Initializing web server...")
-        self.server = WebServer(self.camera)
+        self.server = WebServer(self.camera, self.tape_measure if use_tape_measure else None)
         
         # State
         self.test_mode = test_mode
@@ -81,16 +91,6 @@ class AURAGlasses:
                 logger.error("❌ Gesture keyboard requested but MediaPipe not available!")
                 logger.error("   Install with: pip install mediapipe")
                 sys.exit(1)
-        
-        # Initialize tape measure if requested
-        if use_tape_measure:
-            logger.info("Initializing AR tape measure...")
-            self.tape_measure = DepthTapeMeasure(
-                baseline_mm=65,  # Adjust for your stereo setup
-                focal_px=900,    # Adjust based on your cameras
-                frame_width=Config.SINGLE_CAM_WIDTH,
-                frame_height=Config.SINGLE_CAM_HEIGHT
-            )
         
         logger.info("✅ AURA AI Glasses initialized!")
         

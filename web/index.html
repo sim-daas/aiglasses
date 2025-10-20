@@ -323,6 +323,11 @@
         const mode3dEl = document.getElementById('mode-3d');
         const panels = new Map();
 
+        // Depth smoothing for stable scaling
+        let depthHistory = [];
+        const DEPTH_HISTORY_SIZE = 10;
+        let smoothedCenterDepth = 1.0; // meters
+
         // Three.js setup for depth occlusion
         const scene = new THREE.Scene();
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -395,12 +400,24 @@
                     depthData = j.z;
                     updateDepthMesh();
 
-                    // Update center depth display
+                    // Update and smooth center depth
                     const centerIdx = Math.floor(gridH / 2) * gridW + Math.floor(gridW / 2);
-                    const centerDepth = depthData[centerIdx];
-                    if (centerDepth) {
-                        depthValueEl.textContent = (centerDepth * 100).toFixed(0);
-                    }
+                    const rawDepth = depthData[centerIdx];
+                    const smoothed = smoothDepth(rawDepth);
+
+                    depthValueEl.textContent = (smoothed * 100).toFixed(0);
+
+                    // Update all panels with current depth
+                    panels.forEach((el) => {
+                        if (el.style.display !== 'none') {
+                            // Re-apply transform with updated depth
+                            const cornersStr = el.getAttribute('data-corners');
+                            if (cornersStr) {
+                                const corners = JSON.parse(cornersStr);
+                                placePanel3D(el, corners, smoothed);
+                            }
+                        }
+                    });
                 }
             } catch (e) {
                 console.warn('Depth fetch failed:', e);
@@ -410,128 +427,108 @@
         // Start depth fetching
         fetchDepth();
 
-        // Adjustable parameters
-        const params = {
-            shadowBlur: 0,
-            shadowSpread: 0,
-            boxShadow: 7,
-            bgOpacity: 0.35,
-            borderOpacity: 0.23,
-            borderWidth: 0,
-            textColor: '#00ff88',
-            borderColor: '#00ffa0',
-            fontSize: 22,
-            perspective: 900
-        };
+        // Smooth depth value to reduce jitter
+        function smoothDepth(newDepth) {
+            if (!isFinite(newDepth) || newDepth <= 0) return smoothedCenterDepth;
 
-        // Setup control sliders
-        function setupControls() {
-            const controls = {
-                'shadow-blur': (v) => { params.shadowBlur = v; updatePanels(); },
-                'shadow-spread': (v) => { params.shadowSpread = v; updatePanels(); },
-                'box-shadow': (v) => { params.boxShadow = v; updatePanels(); },
-                'bg-opacity': (v) => { params.bgOpacity = v / 100; updatePanels(); },
-                'border-opacity': (v) => { params.borderOpacity = v / 100; updatePanels(); },
-                'border-width': (v) => { params.borderWidth = v; updatePanels(); },
-                'text-color': (v) => { params.textColor = v; updatePanels(); },
-                'border-color': (v) => { params.borderColor = v; updatePanels(); },
-                'font-size': (v) => { params.fontSize = v; updatePanels(); },
-                'perspective': (v) => { params.perspective = v; cards.style.perspective = `${v}px`; }
-            };
+            depthHistory.push(newDepth);
+            if (depthHistory.length > DEPTH_HISTORY_SIZE) {
+                depthHistory.shift();
+            }
 
-            Object.keys(controls).forEach(id => {
-                const el = document.getElementById(id);
-                const valEl = document.getElementById(`val-${id}`);
-
-                el.addEventListener('input', (e) => {
-                    const val = e.target.value;
-                    if (valEl) {
-                        if (id === 'bg-opacity' || id === 'border-opacity') {
-                            valEl.textContent = (val / 100).toFixed(2);
-                        } else {
-                            valEl.textContent = val;
-                        }
-                    }
-                    controls[id](val);
-                });
-            });
-
-            document.getElementById('toggle-controls').addEventListener('click', () => {
-                document.getElementById('controls').classList.toggle('controls-hidden');
-            });
-
-            document.getElementById('enable-depth-occlusion').addEventListener('change', (e) => {
-                depthOcclusionEnabled = e.target.checked;
-                mode3dEl.textContent = depthOcclusionEnabled ? `Active (${gridW}x${gridH})` : 'Disabled';
-            });
+            // Use median for robustness
+            const sorted = depthHistory.slice().sort((a, b) => a - b);
+            smoothedCenterDepth = sorted[Math.floor(sorted.length / 2)];
+            return smoothedCenterDepth;
         }
 
-        // Update all panel styles
-        function updatePanels() {
-            panels.forEach(el => {
-                el.style.background = `rgba(0, 0, 0, ${params.bgOpacity})`;
-                el.style.border = `${params.borderWidth}px solid rgba(${hexToRgb(params.borderColor)}, ${params.borderOpacity})`;
-                el.style.color = params.textColor;
-                el.style.fontSize = `${params.fontSize}px`;
-                if (params.shadowBlur > 0 || params.shadowSpread > 0) {
-                    el.style.textShadow = `0 0 ${params.shadowBlur}px ${params.textColor}, 0 0 ${params.shadowSpread}px ${params.textColor}`;
-                } else {
-                    el.style.textShadow = 'none';
-                }
-                el.style.boxShadow = `0 10px ${params.boxShadow}px rgba(0, 0, 0, 0.5)`;
-            });
+        // Calculate depth-aware scale (0.5x to 2x range)
+        function getDepthScale(depth) {
+            // Reference depth where scale = 1.0 (e.g., 1 meter)
+            const refDepth = 1.0;
+
+            // Calculate raw scale (inverse relationship: closer = bigger)
+            const rawScale = refDepth / Math.max(0.3, depth);
+
+            // Clamp to 0.5x - 2.0x range with smooth interpolation
+            const minScale = 0.5;
+            const maxScale = 2.0;
+            const clampedScale = Math.max(minScale, Math.min(maxScale, rawScale));
+
+            return clampedScale;
         }
 
-        function hexToRgb(hex) {
-            const r = parseInt(hex.slice(1, 3), 16);
-            const g = parseInt(hex.slice(3, 5), 16);
-            const b = parseInt(hex.slice(5, 7), 16);
-            return `${r}, ${g}, ${b}`;
+        // Add perspective rotation based on position
+        function calculate3DRotation(corners) {
+            if (!corners || corners.length !== 4) return { rotX: 0, rotY: 0, rotZ: 0 };
+
+            const [tl, tr, br, bl] = corners;
+
+            // Calculate center
+            const cx = (tl[0] + tr[0] + br[0] + bl[0]) / 4;
+            const cy = (tl[1] + tr[1] + br[1] + bl[1]) / 4;
+
+            // Calculate rotation from quad distortion
+            const topWidth = Math.hypot(tr[0] - tl[0], tr[1] - tl[1]);
+            const bottomWidth = Math.hypot(br[0] - bl[0], br[1] - bl[1]);
+            const leftHeight = Math.hypot(bl[0] - tl[0], bl[1] - tl[1]);
+            const rightHeight = Math.hypot(br[0] - tr[0], br[1] - tr[1]);
+
+            // X rotation (pitch) from top/bottom width difference
+            const pitchRatio = (topWidth - bottomWidth) / ((topWidth + bottomWidth) / 2);
+            const rotX = Math.max(-45, Math.min(45, pitchRatio * 60));
+
+            // Y rotation (yaw) from left/right height difference
+            const yawRatio = (leftHeight - rightHeight) / ((leftHeight + rightHeight) / 2);
+            const rotY = Math.max(-35, Math.min(35, yawRatio * 50));
+
+            // Z rotation (roll) from top edge angle
+            const topAngle = Math.atan2(tr[1] - tl[1], tr[0] - tl[0]);
+            const rotZ = topAngle * 180 / Math.PI;
+
+            return { rotX, rotY, rotZ };
         }
 
-        function imgToScreen(x, y) {
-            const vw = wrap.clientWidth, vh = wrap.clientHeight;
-            const s = Math.min(vw / imgW, vh / imgH);
-            const dispW = imgW * s, dispH = imgH * s;
-            const offX = (vw - dispW) / 2, offY = (vh - dispH) / 2;
-            return [offX + x * s, offY + y * s];
-        }
+        // Enhanced placement with depth scaling and 3D effects
+        function placePanel3D(el, corners, depthValue = null) {
+            if (!corners || corners.length !== 4) {
+                el.style.display = 'none';
+                return;
+            }
 
-        function orderCorners(pts) {
-            pts = pts.slice();
-            pts.sort((p, q) => (p[1] - q[1]) || (p[0] - q[0]));
-            const tl = pts[0], tr = pts[1];
-            const bl = pts[2], br = pts[3];
-            const top = (tl[0] < tr[0]) ? [tl, tr] : [tr, tl];
-            const bottom = (bl[0] < br[0]) ? [bl, br] : [br, bl];
-            return [top[0], top[1], bottom[1], bottom[0]];
-        }
+            const ord = orderCorners(corners);
+            const scr = ord.map(([x, y]) => imgToScreen(x, y));
 
-        function cssMatrixForQuad(xy, w = 260, h = 140) {
-            const x0 = xy[0][0], y0 = xy[0][1];
-            const x1 = xy[1][0], y1 = xy[1][1];
-            const x2 = xy[2][0], y2 = xy[2][1];
-            const x3 = xy[3][0], y3 = xy[3][1];
+            // Get depth-based scale
+            const depth = depthValue || smoothedCenterDepth;
+            const depthScale = getDepthScale(depth);
 
-            const dx1 = x1 - x2, dy1 = y1 - y2;
-            const dx2 = x3 - x2, dy2 = y3 - y2;
-            const sx = x0 - x1 + x2 - x3;
-            const sy = y0 - y1 + y2 - y3;
+            // Calculate 3D rotations
+            const rotation = calculate3DRotation(ord);
 
-            const g = (sx * dy2 - dx2 * sy) / (dx1 * dy2 - dy1 * dx2);
-            const h2 = (dx1 * sy - sx * dy1) / (dx1 * dy2 - dy1 * dx2);
+            // Base homography matrix
+            const matrix = cssMatrixForQuad(scr, el.offsetWidth || 260, el.offsetHeight || 140);
 
-            let a = x1 - x0 + g * x1;
-            let b = x3 - x0 + h2 * x3;
-            let c = x0;
-            let d = y1 - y0 + g * y1;
-            let e = y3 - y0 + h2 * y3;
-            let f = y0;
-            let g1 = g, h1 = h2;
+            // Apply depth scaling and rotation
+            el.style.transform = `
+                ${matrix}
+                scale(${depthScale})
+                rotateX(${rotation.rotX}deg)
+                rotateY(${rotation.rotY}deg)
+                translateZ(${-depth * 50}px)
+            `;
 
-            a /= w; b /= h; d /= w; e /= h; g1 /= w; h1 /= h;
+            // Add depth-based opacity (far = slightly transparent)
+            const opacityFactor = Math.max(0.7, Math.min(1.0, 2.0 / depth));
+            el.style.opacity = opacityFactor;
 
-            return `matrix3d(${a}, ${d}, 0, ${g1}, ${b}, ${e}, 0, ${h1}, 0, 0, 1, 0, ${c}, ${f}, 0, 1)`;
+            // Add depth-based blur (far = slight blur)
+            const blurAmount = Math.max(0, Math.min(2, (depth - 1.0) * 0.5));
+            el.style.filter = `blur(${blurAmount}px)`;
+
+            el.style.display = 'block';
+
+            console.log(`3D Transform: depth=${depth.toFixed(2)}m, scale=${depthScale.toFixed(2)}x, rotX=${rotation.rotX.toFixed(1)}°`);
         }
 
         function ensurePanel(id, text) {
@@ -547,52 +544,26 @@
             return el;
         }
 
-        function placePanel3D(el, corners) {
-            if (!corners || corners.length !== 4) {
-                el.style.display = 'none';
-                return;
-            }
-
-            const ord = orderCorners(corners);
-            const scr = ord.map(([x, y]) => imgToScreen(x, y));
-            const matrix = cssMatrixForQuad(scr, el.offsetWidth || 260, el.offsetHeight || 140);
-            el.style.transform = matrix;
-            el.style.display = 'block';
-        }
-
-        // Socket.IO connection
-        const socket = io(window.location.origin, {
-            path: '/socket.io',
-            transports: ['polling', 'websocket'],
-            reconnection: true
-        });
-
-        socket.on('connect', () => {
-            console.log('✅ Connected to server');
-            status.textContent = '✅ Connected';
-            status.className = 'status-connected';
-        });
-
-        socket.on('disconnect', (reason) => {
-            console.log('❌ Disconnected:', reason);
-            status.textContent = `❌ Disconnected: ${reason}`;
-            status.className = 'status-disconnected';
-        });
-
+        // Enhanced socket handler with depth info
         socket.on('gemini_result', (result) => {
             console.log('📡 Gemini result received:', result);
 
             const overlays = [{
                 id: 1,
                 text: `${result.answer}\n[${result.object}]`,
-                corners: result.corners || generateCornersFromPosition(result.position, result.location)
+                corners: result.corners || generateCornersFromPosition(result.position, result.location),
+                depth: result.position?.z || smoothedCenterDepth
             }];
 
             const live = new Set();
             overlays.forEach(o => {
                 const text = o.text || o.label || '…';
                 const el = ensurePanel(o.id || 0, text);
-                placePanel3D(el, o.corners);
+
+                // Store corners for depth updates
+                el.setAttribute('data-corners', JSON.stringify(o.corners));
+
+                placePanel3D(el, o.corners, o.depth);
                 live.add(o.id || 0);
             });
 

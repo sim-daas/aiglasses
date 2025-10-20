@@ -1,17 +1,21 @@
-from flask import Flask, render_template, Response, jsonify, request
+from flask import Flask, Response, jsonify, send_from_directory, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 import cv2
+import logging
 import json
 import os
-import logging
 from config import Config
 from text_3d_renderer import Text3DRenderer
 
 logger = logging.getLogger(__name__)
 
 class WebServer:
-    def __init__(self, camera_manager):
+    def __init__(self, camera_manager, tape_measure=None):
+        """Initialize web server with optional tape measure for depth data"""
+        self.camera_manager = camera_manager
+        self.tape_measure = tape_measure
+        
         # Get absolute path to web directory
         current_dir = os.path.dirname(os.path.abspath(__file__))
         web_dir = os.path.join(os.path.dirname(current_dir), 'web')
@@ -50,9 +54,6 @@ class WebServer:
             ping_interval=25,
             manage_session=False
         )
-        
-        self.camera_manager = camera_manager
-        self.latest_result = None
         
         # Initialize 3D text renderer for web feed
         logger.info("Initializing 3D text renderer for web feed...")
@@ -490,6 +491,15 @@ class WebServer:
             if self.latest_result:
                 return jsonify(self.latest_result)
             return jsonify({"status": "no_data"})
+        
+        @self.app.route('/depth')
+        def depth():
+            """Endpoint for depth grid data"""
+            if self.tape_measure:
+                depth_data = self.tape_measure.get_depth_grid()
+                if depth_data:
+                    return jsonify(depth_data)
+            return jsonify({'error': 'Depth data not available'}), 404
     
     def _map_location_to_position(self, location, frame_width, frame_height):
         """Map Gemini's text location to pixel coordinates"""
