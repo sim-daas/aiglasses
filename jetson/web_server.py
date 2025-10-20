@@ -72,6 +72,11 @@ class WebServer:
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
             margin: 0;
             padding: 0;
@@ -92,6 +97,7 @@ class WebServer:
             width: 100%;
             height: 100%;
             object-fit: cover;
+            z-index: 1;
         }
         #three-canvas {
             position: absolute;
@@ -100,26 +106,45 @@ class WebServer:
             width: 100%;
             height: 100%;
             pointer-events: none;
+            z-index: 2;
         }
         #status {
             position: absolute;
             top: 20px;
-            left: 20px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 15px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 15px 20px;
             border-radius: 8px;
-            z-index: 10;
+            z-index: 100;
+            font-size: 14px;
+            max-width: 400px;
+            border: 1px solid #0f0;
         }
         #info {
             position: absolute;
             bottom: 20px;
             left: 20px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 10px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 10px 15px;
             border-radius: 5px;
             font-size: 12px;
             color: #888;
-            z-index: 10;
+            z-index: 100;
+            border: 1px solid #333;
+        }
+        #debug {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 11px;
+            font-family: monospace;
+            color: #0f0;
+            z-index: 100;
+            max-width: 300px;
+            border: 1px solid #0f0;
         }
     </style>
 </head>
@@ -127,6 +152,11 @@ class WebServer:
     <div id="container">
         <img id="video-feed" src="/video_feed" alt="Camera Feed">
         <canvas id="three-canvas"></canvas>
+        
+        <div id="debug">
+            <div>Three.js Status: <span id="threejs-status">Initializing...</span></div>
+            <div>Last Event: <span id="last-event">None</span></div>
+        </div>
         
         <div id="status">
             <div id="status-text">Connecting...</div>
@@ -139,31 +169,52 @@ class WebServer:
     </div>
     
     <script>
+        console.log('🚀 Starting AURA AI Glasses web interface...');
+        
         // Three.js setup
         let scene, camera, renderer;
         let textMesh = null;
         
+        function updateDebug(status, event) {
+            document.getElementById('threejs-status').textContent = status;
+            document.getElementById('last-event').textContent = event;
+        }
+        
         function initThree() {
-            scene = new THREE.Scene();
+            console.log('🎨 Initializing Three.js...');
             
-            const canvas = document.getElementById('three-canvas');
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.z = 5;
-            
-            renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setClearColor(0x000000, 0);
-            
-            // Lighting for 3D effect
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            scene.add(ambientLight);
-            
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(5, 5, 5);
-            scene.add(directionalLight);
-            
-            animate();
-            console.log('✅ Three.js initialized');
+            try {
+                scene = new THREE.Scene();
+                
+                const canvas = document.getElementById('three-canvas');
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                camera.position.z = 5;
+                
+                renderer = new THREE.WebGLRenderer({ 
+                    canvas: canvas, 
+                    alpha: true, 
+                    antialias: true 
+                });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setClearColor(0x000000, 0);
+                
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(5, 5, 5);
+                scene.add(directionalLight);
+                
+                // Start animation loop
+                animate();
+                
+                console.log('✅ Three.js initialized successfully');
+                updateDebug('Ready', 'Initialized');
+            } catch (error) {
+                console.error('❌ Three.js initialization failed:', error);
+                updateDebug('Failed', error.message);
+            }
         }
         
         function animate() {
@@ -172,131 +223,161 @@ class WebServer:
             // Subtle rotation for 3D effect
             if (textMesh) {
                 textMesh.rotation.y = Math.sin(Date.now() * 0.0005) * 0.1;
+                textMesh.rotation.x = Math.sin(Date.now() * 0.0003) * 0.05;
             }
             
             renderer.render(scene, camera);
         }
         
         function create3DText(result) {
-            console.log('Creating 3D text from result:', result);
+            console.log('🎨 Creating 3D text from result:', result);
+            updateDebug('Creating text...', JSON.stringify(result.object));
             
-            // Remove old text
-            if (textMesh) {
-                scene.remove(textMesh);
-                textMesh.geometry.dispose();
-                textMesh.material.dispose();
-            }
-            
-            const text = result.answer;
-            const label = result.object;
-            const location = result.location || 'center';
-            
-            // Create text canvas with higher resolution
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = 2048;
-            canvas.height = 1024;
-            
-            // Clear canvas
-            context.fillStyle = 'rgba(0, 0, 0, 0)';
-            context.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Word wrap
-            const maxWidth = 1800;
-            const words = text.split(' ');
-            const lines = [];
-            let currentLine = words[0];
-            
-            context.font = 'bold 120px Arial';
-            for (let i = 1; i < words.length; i++) {
-                const testLine = currentLine + ' ' + words[i];
-                const metrics = context.measureText(testLine);
-                if (metrics.width > maxWidth) {
-                    lines.push(currentLine);
-                    currentLine = words[i];
-                } else {
-                    currentLine = testLine;
-                }
-            }
-            lines.push(currentLine);
-            
-            // Draw depth layers for 3D effect
-            const layerCount = 8;
-            let yPos = 400;
-            const lineHeight = 140;
-            
-            for (let line of lines) {
-                // Depth layers
-                for (let i = layerCount; i > 0; i--) {
-                    context.fillStyle = `rgba(80, 80, 80, ${0.4 * (layerCount - i) / layerCount})`;
-                    context.font = 'bold 120px Arial';
-                    context.textAlign = 'center';
-                    context.textBaseline = 'middle';
-                    context.fillText(line, 1024 - i * 3, yPos - i * 3);
+            try {
+                // Remove old text
+                if (textMesh) {
+                    scene.remove(textMesh);
+                    textMesh.geometry.dispose();
+                    textMesh.material.dispose();
+                    console.log('🗑️ Removed old text mesh');
                 }
                 
-                // Main text with glow
-                context.shadowColor = 'rgba(0, 255, 0, 0.8)';
-                context.shadowBlur = 20;
-                context.shadowOffsetX = 0;
-                context.shadowOffsetY = 0;
-                context.fillStyle = '#00ff00';
+                const text = result.answer || 'No answer';
+                const label = result.object || 'unknown';
+                const location = result.location || 'center';
+                
+                console.log(`Creating text: "${text}" at ${location}`);
+                
+                // Create text canvas
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = 2048;
+                canvas.height = 1024;
+                
+                // Clear canvas
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Word wrap
+                const maxWidth = 1800;
+                const words = text.split(' ');
+                const lines = [];
+                let currentLine = words[0];
+                
                 context.font = 'bold 120px Arial';
-                context.fillText(line, 1024, yPos);
+                for (let i = 1; i < words.length; i++) {
+                    const testLine = currentLine + ' ' + words[i];
+                    const metrics = context.measureText(testLine);
+                    if (metrics.width > maxWidth) {
+                        lines.push(currentLine);
+                        currentLine = words[i];
+                    } else {
+                        currentLine = testLine;
+                    }
+                }
+                lines.push(currentLine);
                 
-                yPos += lineHeight;
+                console.log(`Text wrapped into ${lines.length} lines`);
+                
+                // Draw depth layers for 3D effect
+                const layerCount = 8;
+                let yPos = 350;
+                const lineHeight = 140;
+                
+                for (let line of lines) {
+                    // Depth layers
+                    for (let i = layerCount; i > 0; i--) {
+                        context.fillStyle = `rgba(80, 80, 80, ${0.5 * (layerCount - i) / layerCount})`;
+                        context.font = 'bold 120px Arial';
+                        context.textAlign = 'center';
+                        context.textBaseline = 'middle';
+                        context.fillText(line, 1024 - i * 3, yPos - i * 3);
+                    }
+                    
+                    // Main text with glow
+                    context.shadowColor = 'rgba(0, 255, 0, 1)';
+                    context.shadowBlur = 25;
+                    context.shadowOffsetX = 0;
+                    context.shadowOffsetY = 0;
+                    
+                    // Outline
+                    context.strokeStyle = '#000000';
+                    context.lineWidth = 8;
+                    context.strokeText(line, 1024, yPos);
+                    
+                    // Fill
+                    context.fillStyle = '#00ff00';
+                    context.fillText(line, 1024, yPos);
+                    
+                    yPos += lineHeight;
+                }
+                
+                // Label
+                yPos += 20;
+                context.shadowBlur = 15;
+                context.strokeStyle = '#000000';
+                context.lineWidth = 6;
+                context.fillStyle = '#00ccff';
+                context.font = 'bold 70px Arial';
+                const labelText = `[${label}]`;
+                context.strokeText(labelText, 1024, yPos);
+                context.fillText(labelText, 1024, yPos);
+                
+                console.log('Canvas text drawn');
+                
+                // Create texture
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.needsUpdate = true;
+                
+                // Create material
+                const material = new THREE.MeshPhongMaterial({
+                    map: texture,
+                    transparent: true,
+                    opacity: 0.95,
+                    side: THREE.DoubleSide,
+                    shininess: 60,
+                    specular: 0x444444,
+                    emissive: 0x003300
+                });
+                
+                // Create geometry with depth
+                const geometry = new THREE.BoxGeometry(10, 5, 0.6);
+                
+                // Create mesh
+                textMesh = new THREE.Mesh(geometry, material);
+                
+                // Position based on location
+                const locationMap = {
+                    'top-left': [-5, 3, -4],
+                    'top-center': [0, 3, -4],
+                    'top-right': [5, 3, -4],
+                    'center-left': [-5, 0, -4],
+                    'center': [0, 0, -4],
+                    'center-right': [5, 0, -4],
+                    'bottom-left': [-5, -3, -4],
+                    'bottom-center': [0, -3, -4],
+                    'bottom-right': [5, -3, -4]
+                };
+                
+                const pos = locationMap[location] || [0, 0, -4];
+                const depth = result.position && result.position.z ? result.position.z : 0.5;
+                const zPos = pos[2] - (depth * 2);
+                
+                textMesh.position.set(pos[0], pos[1], zPos);
+                textMesh.scale.set(1, 1, 1);
+                
+                scene.add(textMesh);
+                
+                console.log(`✅ 3D text added to scene at position: [${pos[0]}, ${pos[1]}, ${zPos}]`);
+                updateDebug('Text visible!', `${location} @ z:${zPos.toFixed(2)}`);
+                
+            } catch (error) {
+                console.error('❌ Error creating 3D text:', error);
+                updateDebug('Error!', error.message);
             }
-            
-            // Label
-            context.shadowBlur = 10;
-            context.fillStyle = '#00ccff';
-            context.font = 'bold 60px Arial';
-            context.fillText(`[${label}]`, 1024, yPos + 40);
-            
-            // Create texture
-            const texture = new THREE.CanvasTexture(canvas);
-            
-            // Create material with proper 3D properties
-            const material = new THREE.MeshPhongMaterial({
-                map: texture,
-                transparent: true,
-                side: THREE.DoubleSide,
-                shininess: 60,
-                specular: 0x555555,
-                emissive: 0x002200
-            });
-            
-            // Create geometry with actual depth
-            const geometry = new THREE.BoxGeometry(8, 4, 0.5);
-            
-            // Create mesh
-            textMesh = new THREE.Mesh(geometry, material);
-            
-            // Position based on location
-            const locationMap = {
-                'top-left': [-4, 2.5, -3],
-                'top-center': [0, 2.5, -3],
-                'top-right': [4, 2.5, -3],
-                'center-left': [-4, 0, -3],
-                'center': [0, 0, -3],
-                'center-right': [4, 0, -3],
-                'bottom-left': [-4, -2.5, -3],
-                'bottom-center': [0, -2.5, -3],
-                'bottom-right': [4, -2.5, -3]
-            };
-            
-            const pos = locationMap[location] || [0, 0, -3];
-            const depth = result.position && result.position.z ? result.position.z : 0.5;
-            const zPos = pos[2] - (depth * 3);
-            
-            textMesh.position.set(pos[0], pos[1], zPos);
-            
-            scene.add(textMesh);
-            
-            console.log(`📝 3D text created at location: ${location}, z: ${zPos}`);
         }
         
         // Socket.IO setup
+        console.log('🔌 Connecting to Socket.IO...');
         const socket = io(window.location.origin, {
             path: '/socket.io',
             transports: ['polling', 'websocket'],
@@ -305,52 +386,60 @@ class WebServer:
         });
         
         socket.on('connect', () => {
-            console.log('✅ Connected to server');
+            console.log('✅ Socket.IO connected');
             document.getElementById('status-text').textContent = '✅ Connected';
             document.getElementById('status-text').style.color = '#0f0';
+            updateDebug('Connected', 'Socket.IO active');
         });
         
         socket.on('disconnect', (reason) => {
-            console.log('❌ Disconnected:', reason);
-            document.getElementById('status-text').textContent = '❌ Disconnected';
+            console.log('❌ Socket.IO disconnected:', reason);
+            document.getElementById('status-text').textContent = '❌ Disconnected: ' + reason;
             document.getElementById('status-text').style.color = '#f00';
+            updateDebug('Disconnected', reason);
         });
         
         socket.on('status', (data) => {
-            console.log('📡 Status:', data.message);
+            console.log('📡 Status message:', data.message);
             document.getElementById('status-text').textContent = data.message;
         });
         
         socket.on('gemini_result', (result) => {
-            console.log('📡 Gemini Result received:', result);
+            console.log('📡 ========== GEMINI RESULT RECEIVED ==========');
+            console.log('Full result object:', result);
+            console.log('Answer:', result.answer);
+            console.log('Object:', result.object);
+            console.log('Location:', result.location);
+            console.log('Position:', result.position);
+            console.log('==============================================');
             
             // Update status
             document.getElementById('status-text').innerHTML = 
-                `Q: ${result.transcription}<br>A: ${result.answer}<br>Location: ${result.location}`;
+                `<strong>Q:</strong> ${result.transcription}<br>` +
+                `<strong>A:</strong> ${result.answer}<br>` +
+                `<strong>Object:</strong> ${result.object}<br>` +
+                `<strong>Location:</strong> ${result.location}`;
             
             // Create 3D text
             try {
                 create3DText(result);
-                console.log('✅ 3D text created successfully');
+                console.log('✅ 3D text creation completed');
             } catch (error) {
-                console.error('❌ Error creating 3D text:', error);
+                console.error('❌ Fatal error creating 3D text:', error);
+                console.error('Stack trace:', error.stack);
             }
             
-            // Auto-hide after 10 seconds
+            // Auto-hide after 15 seconds
             setTimeout(() => {
                 if (textMesh) {
                     scene.remove(textMesh);
                     textMesh.geometry.dispose();
                     textMesh.material.dispose();
                     textMesh = null;
-                    console.log('🗑️ 3D text removed');
+                    console.log('🗑️ 3D text removed after timeout');
+                    updateDebug('Ready', 'Text cleared');
                 }
-            }, 10000);
-        });
-        
-        // Debug: Log all events
-        socket.onAny((eventName, ...args) => {
-            console.log('📨 Socket event:', eventName, args);
+            }, 15000);
         });
         
         // Handle window resize
@@ -358,13 +447,16 @@ class WebServer:
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            console.log('📐 Window resized');
         });
         
-        // Initialize
+        // Initialize on load
         window.addEventListener('load', () => {
+            console.log('📄 Page loaded, initializing...');
             initThree();
-            console.log('🚀 AURA AI Glasses loaded');
         });
+        
+        console.log('✅ Script loaded and ready');
     </script>
 </body>
 </html>"""
@@ -372,7 +464,7 @@ class WebServer:
         with open(os.path.join(web_dir, 'index.html'), 'w') as f:
             f.write(html_content)
         
-        logger.info(f"✅ Created index.html with Three.js")
+        logger.info(f"✅ Created index.html with Three.js (all inline)")
     
     def _setup_routes(self):
         """Setup Flask routes"""
