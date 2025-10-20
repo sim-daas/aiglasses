@@ -22,7 +22,7 @@ class Config:
     
     # Gemini API
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-    GEMINI_MODEL = 'models/gemini-1.5-pro'  # Best multimodal model
+    GEMINI_MODEL = 'gemini-2.5-flash'  # Best multimodal model
     GEMINI_MAX_RETRIES = 3
     GEMINI_RETRY_DELAY = 2  # seconds
     
