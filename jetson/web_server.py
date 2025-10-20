@@ -52,6 +52,7 @@ class WebServer:
         
         self.camera_manager = camera_manager
         self.latest_result = None
+        self.show_overlay = True  # Flag to control overlay
         
         logger.info("Setting up Flask routes...")
         self._setup_routes()
@@ -242,12 +243,127 @@ class WebServer:
                 return jsonify(self.latest_result)
             return jsonify({"status": "no_data"})
     
+    def _draw_3d_text_overlay(self, frame, result):
+        """Draw 3D text overlay on frame for web stream"""
+        if not result or not self.show_overlay:
+            return frame
+        
+        # Get frame dimensions
+        h, w = frame.shape[:2]
+        
+        # Map location to coordinates
+        location_map = {
+            'top-left': (int(w * 0.15), int(h * 0.15)),
+            'top-center': (int(w * 0.5), int(h * 0.15)),
+            'top-right': (int(w * 0.85), int(h * 0.15)),
+            'center-left': (int(w * 0.15), int(h * 0.5)),
+            'center': (int(w * 0.5), int(h * 0.5)),
+            'center-right': (int(w * 0.85), int(h * 0.5)),
+            'bottom-left': (int(w * 0.15), int(h * 0.85)),
+            'bottom-center': (int(w * 0.5), int(h * 0.85)),
+            'bottom-right': (int(w * 0.85), int(h * 0.85)),
+        }
+        
+        location = result.get('location', 'center')
+        x, y = location_map.get(location, (int(w * 0.5), int(h * 0.5)))
+        
+        # Get answer text
+        answer = result['answer']
+        object_name = result['object']
+        
+        # Word wrap
+        max_chars = 20  # Smaller for web view
+        words = answer.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            if len(current_line) + len(word) + 1 <= max_chars:
+                current_line += word + " "
+            else:
+                if current_line:
+                    lines.append(current_line.strip())
+                current_line = word + " "
+        
+        if current_line:
+            lines.append(current_line.strip())
+        
+        # Text settings
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+        
+        max_width = 0
+        total_height = 0
+        line_heights = []
+        
+        for line in lines:
+            (tw, th), baseline = cv2.getTextSize(line, font, font_scale, thickness)
+            max_width = max(max_width, tw)
+            line_heights.append(th + baseline)
+            total_height += th + baseline + 3
+        
+        # Add object name
+        obj_text = f"[{object_name}]"
+        (obj_w, obj_h), obj_baseline = cv2.getTextSize(obj_text, font, 0.4, 1)
+        max_width = max(max_width, obj_w)
+        total_height += obj_h + obj_baseline + 8
+        
+        # Draw background box
+        padding = 10
+        box_x1 = x - max_width // 2 - padding
+        box_y1 = y - total_height // 2 - padding
+        box_x2 = x + max_width // 2 + padding
+        box_y2 = y + total_height // 2 + padding
+        
+        # Clamp to frame
+        box_x1 = max(3, box_x1)
+        box_y1 = max(3, box_y1)
+        box_x2 = min(w - 3, box_x2)
+        box_y2 = min(h - 3, box_y2)
+        
+        # Semi-transparent background
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+        
+        # Border
+        cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (0, 255, 0), 1)
+        
+        # Draw text
+        current_y = y - total_height // 2 + 8
+        
+        for i, line in enumerate(lines):
+            # Shadow
+            cv2.putText(frame, line, (x - max_width // 2 + 1, current_y + 1),
+                       font, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+            # Main text
+            cv2.putText(frame, line, (x - max_width // 2, current_y),
+                       font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
+            
+            current_y += line_heights[i] + 3
+        
+        # Object name
+        current_y += 3
+        cv2.putText(frame, obj_text, (x - obj_w // 2, current_y),
+                   font, 0.4, (0, 200, 255), 1, cv2.LINE_AA)
+        
+        # Location dot
+        cv2.circle(frame, (x, y), 3, (0, 255, 0), -1)
+        cv2.circle(frame, (x, y), 5, (255, 255, 255), 1)
+        
+        return frame
+    
     def _generate_frames(self):
         """Generate JPEG frames for MJPEG stream"""
         while True:
             frame_left, frame_right, depth_map = self.camera_manager.get_frames()
             
             if frame_left is not None:
+                # Add overlay if we have results
+                if self.latest_result:
+                    frame_left = self._draw_3d_text_overlay(frame_left, self.latest_result)
+                
                 # Encode frame as JPEG
                 ret, buffer = cv2.imencode('.jpg', frame_left, 
                                           [cv2.IMWRITE_JPEG_QUALITY, 85])

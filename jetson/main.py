@@ -57,6 +57,7 @@ class AURAGlasses:
         # State
         self.recording = False
         self.test_mode = test_mode
+        self.current_result = None  # Store latest result for overlay
         
         logger.info("✅ AURA AI Glasses initialized!")
         
@@ -134,6 +135,10 @@ class AURAGlasses:
             # Broadcast to web clients
             logger.info("Broadcasting to web clients...")
             self.server.broadcast_result(result)
+            
+            # Store result for overlay
+            self.current_result = result
+            
             logger.info("✅ Broadcast complete!")
             
             # Cleanup temp files
@@ -223,6 +228,118 @@ class AURAGlasses:
             import traceback
             logger.error(traceback.print_exc())
     
+    def _draw_3d_text_overlay(self, frame, result):
+        """Draw 3D text overlay on frame based on location"""
+        if not result:
+            return frame
+        
+        # Get frame dimensions
+        h, w = frame.shape[:2]
+        
+        # Map location to coordinates
+        location_map = {
+            'top-left': (int(w * 0.15), int(h * 0.15)),
+            'top-center': (int(w * 0.5), int(h * 0.15)),
+            'top-right': (int(w * 0.85), int(h * 0.15)),
+            'center-left': (int(w * 0.15), int(h * 0.5)),
+            'center': (int(w * 0.5), int(h * 0.5)),
+            'center-right': (int(w * 0.85), int(h * 0.5)),
+            'bottom-left': (int(w * 0.15), int(h * 0.85)),
+            'bottom-center': (int(w * 0.5), int(h * 0.85)),
+            'bottom-right': (int(w * 0.85), int(h * 0.85)),
+        }
+        
+        location = result.get('location', 'center')
+        x, y = location_map.get(location, (int(w * 0.5), int(h * 0.5)))
+        
+        # Get answer text
+        answer = result['answer']
+        object_name = result['object']
+        
+        # Word wrap for long answers
+        max_chars = 30
+        words = answer.split()
+        lines = []
+        current_line = ""
+        
+        for word in words:
+            if len(current_line) + len(word) + 1 <= max_chars:
+                current_line += word + " "
+            else:
+                if current_line:
+                    lines.append(current_line.strip())
+                current_line = word + " "
+        
+        if current_line:
+            lines.append(current_line.strip())
+        
+        # Calculate text size for background box
+        font = cv2.FONT_HERSHEY_DUPLEX
+        font_scale = 0.6
+        thickness = 2
+        
+        max_width = 0
+        total_height = 0
+        line_heights = []
+        
+        for line in lines:
+            (tw, th), baseline = cv2.getTextSize(line, font, font_scale, thickness)
+            max_width = max(max_width, tw)
+            line_heights.append(th + baseline)
+            total_height += th + baseline + 5
+        
+        # Add object name line
+        obj_text = f"[{object_name}]"
+        (obj_w, obj_h), obj_baseline = cv2.getTextSize(obj_text, font, 0.5, 1)
+        max_width = max(max_width, obj_w)
+        total_height += obj_h + obj_baseline + 10
+        
+        # Draw semi-transparent background
+        padding = 15
+        box_x1 = x - max_width // 2 - padding
+        box_y1 = y - total_height // 2 - padding
+        box_x2 = x + max_width // 2 + padding
+        box_y2 = y + total_height // 2 + padding
+        
+        # Ensure box is within frame
+        box_x1 = max(5, box_x1)
+        box_y1 = max(5, box_y1)
+        box_x2 = min(w - 5, box_x2)
+        box_y2 = min(h - 5, box_y2)
+        
+        # Create overlay for transparency
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+        
+        # Draw border
+        cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (0, 255, 0), 2)
+        
+        # Draw text lines
+        current_y = y - total_height // 2 + 10
+        
+        for i, line in enumerate(lines):
+            # Draw shadow
+            cv2.putText(frame, line, (x - max_width // 2 + 2, current_y + 2),
+                       font, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+            
+            # Draw main text
+            cv2.putText(frame, line, (x - max_width // 2, current_y),
+                       font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
+            
+            current_y += line_heights[i] + 5
+        
+        # Draw object name
+        current_y += 5
+        cv2.putText(frame, obj_text, (x - obj_w // 2, current_y),
+                   font, 0.5, (0, 200, 255), 1, cv2.LINE_AA)
+        
+        # Draw location indicator dot
+        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
+        cv2.circle(frame, (x, y), 7, (255, 255, 255), 1)
+        
+        return frame
+    
     def run(self):
         """Run the main application"""
         # Start web server in separate thread
@@ -253,12 +370,21 @@ class AURAGlasses:
                 if frame_left is not None:
                     frame_count += 1
                     
+                    # Create copies for overlay
+                    display_left = frame_left.copy()
+                    display_right = frame_right.copy()
+                    
+                    # Add overlay if we have results
+                    if self.current_result:
+                        display_left = self._draw_3d_text_overlay(display_left, self.current_result)
+                        display_right = self._draw_3d_text_overlay(display_right, self.current_result)
+                    
                     # Show stereo view
-                    stereo_view = cv2.hconcat([frame_left, frame_right])
+                    stereo_view = cv2.hconcat([display_left, display_right])
                     
                     # Add frame counter
                     cv2.putText(stereo_view, f"Frame: {frame_count}", (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                     
                     cv2.imshow('AURA AI - Stereo Camera', stereo_view)
                 
