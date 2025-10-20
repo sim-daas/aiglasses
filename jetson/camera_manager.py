@@ -22,104 +22,101 @@ class StereoCamera:
         )
         
     def initialize(self):
-        """Initialize both cameras"""
+        """Initialize both cameras using integer indices"""
         print(f"🎥 Initializing cameras...")
         
-        # Verify devices exist
-        self._verify_camera_devices()
+        # Detect available cameras
+        available_cameras = self._detect_cameras()
         
-        # List available cameras
-        self._list_available_cameras()
+        if len(available_cameras) < 2:
+            raise RuntimeError(f"Need 2 cameras, found {len(available_cameras)}: {available_cameras}")
         
-        # Open left camera (use default backend, no CAP_V4L2)
-        print(f"📷 Opening left camera ({Config.CAMERA_LEFT_INDEX})...")
-        self.cap_left = cv2.VideoCapture(Config.CAMERA_LEFT_INDEX)
+        # Use the first two available cameras
+        left_idx = available_cameras[0]
+        right_idx = available_cameras[1]
+        
+        print(f"📷 Using camera indices: Left={left_idx}, Right={right_idx}")
+        
+        # Open left camera with integer index
+        print(f"📷 Opening left camera (index {left_idx})...")
+        self.cap_left = cv2.VideoCapture(left_idx)
         
         if not self.cap_left.isOpened():
-            raise RuntimeError(f"Cannot open camera {Config.CAMERA_LEFT_INDEX}")
+            raise RuntimeError(f"Cannot open camera index {left_idx}")
         
-        # Set properties for left camera
+        # Set properties
         self.cap_left.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_WIDTH)
         self.cap_left.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_HEIGHT)
         self.cap_left.set(cv2.CAP_PROP_FPS, Config.CAMERA_FPS)
         self.cap_left.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
-        # Test read from left camera
+        # Test read
         ret, frame = self.cap_left.read()
         if not ret:
             self.cap_left.release()
-            raise RuntimeError(f"Camera {Config.CAMERA_LEFT_INDEX} opened but cannot read frames")
+            raise RuntimeError(f"Camera {left_idx} opened but cannot read frames")
         
         print(f"✅ Left camera initialized: {frame.shape[1]}x{frame.shape[0]}")
         
-        # Important: Delay before opening second camera
+        # Wait before opening second camera
         print("⏳ Waiting before opening second camera...")
-        time.sleep(1.0)  # Increased delay
+        time.sleep(1.0)
         
-        # Open right camera (use default backend, no CAP_V4L2)
-        print(f"📷 Opening right camera ({Config.CAMERA_RIGHT_INDEX})...")
-        self.cap_right = cv2.VideoCapture(Config.CAMERA_RIGHT_INDEX)
+        # Open right camera
+        print(f"📷 Opening right camera (index {right_idx})...")
+        self.cap_right = cv2.VideoCapture(right_idx)
         
         if not self.cap_right.isOpened():
-            self.cap_left.release()  # Clean up left camera
-            raise RuntimeError(f"Cannot open camera {Config.CAMERA_RIGHT_INDEX}")
+            self.cap_left.release()
+            raise RuntimeError(f"Cannot open camera index {right_idx}")
         
-        # Set properties for right camera
+        # Set properties
         self.cap_right.set(cv2.CAP_PROP_FRAME_WIDTH, Config.CAMERA_WIDTH)
         self.cap_right.set(cv2.CAP_PROP_FRAME_HEIGHT, Config.CAMERA_HEIGHT)
         self.cap_right.set(cv2.CAP_PROP_FPS, Config.CAMERA_FPS)
         self.cap_right.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
-        # Test read from right camera
+        # Test read
         ret, frame = self.cap_right.read()
         if not ret:
             self.cap_left.release()
             self.cap_right.release()
-            raise RuntimeError(f"Camera {Config.CAMERA_RIGHT_INDEX} opened but cannot read frames")
+            raise RuntimeError(f"Camera {right_idx} opened but cannot read frames")
         
         print(f"✅ Right camera initialized: {frame.shape[1]}x{frame.shape[0]}")
         print(f"✅ Stereo cameras ready at {Config.CAMERA_WIDTH}x{Config.CAMERA_HEIGHT}@{Config.CAMERA_FPS}fps")
     
-    def _verify_camera_devices(self):
-        """Verify camera device files exist"""
-        print("🔍 Verifying camera devices...")
+    def _detect_cameras(self):
+        """Detect all available camera indices (not paths)"""
+        print("🔍 Detecting available cameras by index...")
+        available = []
         
-        if not os.path.exists(Config.CAMERA_LEFT_INDEX):
-            raise RuntimeError(f"Camera device {Config.CAMERA_LEFT_INDEX} does not exist")
-        print(f"  ✅ {Config.CAMERA_LEFT_INDEX} exists")
-        
-        if not os.path.exists(Config.CAMERA_RIGHT_INDEX):
-            raise RuntimeError(f"Camera device {Config.CAMERA_RIGHT_INDEX} does not exist")
-        print(f"  ✅ {Config.CAMERA_RIGHT_INDEX} exists")
-        
-    def _list_available_cameras(self):
-        """List available cameras for debugging"""
-        print("🔍 Scanning /dev/video* devices...")
-        
-        for i in range(10):
-            device = f"/dev/video{i}"
-            if os.path.exists(device):
-                # Try opening without backend specification
-                try:
-                    cap = cv2.VideoCapture(device)
-                    if cap.isOpened():
-                        ret, frame = cap.read()
-                        cap.release()
-                        
-                        if ret:
-                            print(f"  ✅ {device} - Working (captured {frame.shape})")
-                        else:
-                            print(f"  ⚠️  {device} - Opens but no frames")
+        # Check indices 0-9
+        for idx in range(10):
+            try:
+                cap = cv2.VideoCapture(idx)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    cap.release()
+                    
+                    if ret and frame is not None:
+                        available.append(idx)
+                        print(f"  ✅ Camera {idx} - Working ({frame.shape})")
                     else:
-                        print(f"  ❌ {device} - Cannot open")
-                    
-                    # Small delay between tests
-                    time.sleep(0.2)
-                    
-                except Exception as e:
-                    print(f"  ❌ {device} - Error: {e}")
-            else:
-                break  # No more devices
+                        print(f"  ⚠️  Camera {idx} - Opens but no frames (metadata device?)")
+                
+                # Small delay
+                time.sleep(0.2)
+                
+            except Exception as e:
+                print(f"  ❌ Camera {idx} - Error: {e}")
+        
+        if not available:
+            print("  ⚠️  No working cameras detected!")
+        else:
+            print(f"  📊 Found {len(available)} working camera(s): {available}")
+        
+        return available
     
     def start(self):
         """Start capture thread"""

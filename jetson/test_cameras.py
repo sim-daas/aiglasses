@@ -1,28 +1,22 @@
 #!/usr/bin/env python3
 """
-Test script to verify camera access with different methods
+Test script - Use INTEGER indices instead of device paths for Jetson
 """
 
 import cv2
 import time
-import os
 
-def test_camera_by_path(device_path):
-    """Test camera using device path"""
+def test_camera_by_index(index):
+    """Test camera using INTEGER index (not device path)"""
     print(f"\n{'='*50}")
-    print(f"Testing Camera: {device_path}")
+    print(f"Testing Camera Index: {index}")
     print('='*50)
     
-    if not os.path.exists(device_path):
-        print(f"❌ Device {device_path} does not exist")
-        return False
-    
-    # Method 1: Default backend (no specification)
-    print("\n1. Testing with default backend (automatic)...")
-    cap = cv2.VideoCapture(device_path)
+    print(f"Opening camera {index}...")
+    cap = cv2.VideoCapture(index)
     
     if cap.isOpened():
-        print(f"✅ Opened with default backend")
+        print(f"✅ Opened camera {index}")
         ret, frame = cap.read()
         if ret:
             print(f"✅ Successfully read frame: {frame.shape}")
@@ -32,25 +26,26 @@ def test_camera_by_path(device_path):
             height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
             fps = cap.get(cv2.CAP_PROP_FPS)
             print(f"📊 Properties: {int(width)}x{int(height)} @ {fps}fps")
+            
+            cap.release()
+            time.sleep(0.3)
+            return True
         else:
-            print(f"❌ Opened but cannot read frames")
-        cap.release()
-        time.sleep(0.3)  # Delay after release
-        return ret
+            print(f"❌ Opened but cannot read frames (may be metadata device)")
+            cap.release()
+            return False
     else:
-        print(f"❌ Cannot open with default backend")
+        print(f"❌ Cannot open camera {index}")
         return False
-    
-    # Note: We removed V4L2 and GStreamer tests since they fail on your system
 
 def test_simultaneous():
-    """Test opening both cameras simultaneously"""
+    """Test opening both cameras simultaneously using indices"""
     print(f"\n{'='*50}")
-    print("Testing Simultaneous Camera Access (Default Backend)")
+    print("Testing Simultaneous Camera Access (Integer Indices)")
     print('='*50)
     
     print("Opening camera 0...")
-    cap0 = cv2.VideoCapture("/dev/video0")
+    cap0 = cv2.VideoCapture(0)
     
     if not cap0.isOpened():
         print("❌ Failed to open camera 0")
@@ -63,7 +58,7 @@ def test_simultaneous():
     time.sleep(1.0)
     
     print("Opening camera 1...")
-    cap1 = cv2.VideoCapture("/dev/video1")
+    cap1 = cv2.VideoCapture(1)
     
     if not cap1.isOpened():
         print("❌ Failed to open camera 1")
@@ -76,7 +71,7 @@ def test_simultaneous():
     print("\n📸 Testing frame capture from both cameras...")
     
     ret0, frame0 = cap0.read()
-    time.sleep(0.1)  # Small delay between reads
+    time.sleep(0.1)
     ret1, frame1 = cap1.read()
     
     if ret0 and ret1:
@@ -100,7 +95,7 @@ def test_simultaneous():
             if ret0 and ret1:
                 print(f"  Frame {i+1}: ✅")
             else:
-                print(f"  Frame {i+1}: ❌ (L:{ret0}, R:{ret1})")
+                print(f"  Frame {i+1}: ❌ (Cam0:{ret0}, Cam1:{ret1})")
             
             time.sleep(0.1)
     
@@ -109,64 +104,83 @@ def test_simultaneous():
     
     return success
 
-def test_sequential_open_close():
-    """Test opening cameras sequentially with proper cleanup"""
+def detect_all_cameras():
+    """Detect all available cameras"""
     print(f"\n{'='*50}")
-    print("Testing Sequential Open/Close")
+    print("Detecting All Available Cameras")
     print('='*50)
     
-    for attempt in range(3):
-        print(f"\nAttempt {attempt + 1}/3:")
-        
-        # Open camera 0
-        cap0 = cv2.VideoCapture("/dev/video0")
-        if cap0.isOpened():
-            ret, _ = cap0.read()
-            print(f"  Camera 0: {'✅' if ret else '❌'}")
-            cap0.release()
-            time.sleep(0.5)
-        
-        # Open camera 1
-        cap1 = cv2.VideoCapture("/dev/video1")
-        if cap1.isOpened():
-            ret, _ = cap1.read()
-            print(f"  Camera 1: {'✅' if ret else '❌'}")
-            cap1.release()
-            time.sleep(0.5)
+    available = []
+    
+    for idx in range(10):
+        try:
+            cap = cv2.VideoCapture(idx)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                cap.release()
+                
+                if ret and frame is not None:
+                    available.append(idx)
+                    print(f"  ✅ Camera {idx} - Working ({frame.shape})")
+                else:
+                    print(f"  ⚠️  Camera {idx} - Opens but no frames")
+            
+            time.sleep(0.2)
+        except Exception as e:
+            pass
+    
+    print(f"\n📊 Summary: Found {len(available)} working camera(s): {available}")
+    return available
 
 if __name__ == "__main__":
-    print("🎥 Jetson Camera Test Script (Simplified)")
+    print("🎥 Jetson Camera Test Script (Integer Indices)")
     print("="*50)
-    print("Using default OpenCV backend (no V4L2/GStreamer)")
+    print("Using cv2.VideoCapture(INTEGER) instead of device paths")
     print()
     
+    # First, detect all cameras
+    available = detect_all_cameras()
+    
+    if len(available) == 0:
+        print("\n❌ No cameras detected!")
+        exit(1)
+    
+    if len(available) == 1:
+        print("\n⚠️  Only 1 camera detected. Need 2 for stereo.")
+        print("   Check if both cameras are connected.")
+        exit(1)
+    
     # Test individual cameras
-    cam0_ok = test_camera_by_path("/dev/video0")
+    print(f"\n{'='*50}")
+    print("Testing Individual Cameras")
+    print('='*50)
+    
+    cam0_ok = test_camera_by_index(available[0])
     time.sleep(0.5)
     
-    cam1_ok = test_camera_by_path("/dev/video1")
+    cam1_ok = test_camera_by_index(available[1])
     time.sleep(0.5)
     
-    # Test sequential access
-    test_sequential_open_close()
-    time.sleep(0.5)
-    
-    # Test simultaneous access (the real test)
+    # Test simultaneous access
     if cam0_ok and cam1_ok:
         simultaneous_ok = test_simultaneous()
     else:
         print("\n⚠️  Skipping simultaneous test (individual cameras failed)")
         simultaneous_ok = False
     
+    # Results
     print("\n" + "="*50)
     print("📊 Test Results:")
-    print(f"  Camera 0: {'✅ Working' if cam0_ok else '❌ Failed'}")
-    print(f"  Camera 1: {'✅ Working' if cam1_ok else '❌ Failed'}")
+    print(f"  Camera {available[0]}: {'✅ Working' if cam0_ok else '❌ Failed'}")
+    if len(available) > 1:
+        print(f"  Camera {available[1]}: {'✅ Working' if cam1_ok else '❌ Failed'}")
     print(f"  Simultaneous: {'✅ Working' if simultaneous_ok else '❌ Failed'}")
     
     if simultaneous_ok:
         print("\n🎉 SUCCESS! Both cameras work together")
         print("   You can now run main.py")
     else:
-        print("\n⚠️  Simultaneous access failed")
-        print("   Try: sudo rmmod <camera_module> && sudo modprobe <camera_module>")
+        print("\n⚠️  Issues detected:")
+        print("   1. You may only have 1 physical camera")
+        print("   2. /dev/video1 may be a metadata device")
+        print("   3. Check: v4l2-ctl --list-devices")
