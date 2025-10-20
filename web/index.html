@@ -544,6 +544,148 @@
             return el;
         }
 
+        // Adjustable parameters
+        const params = {
+            shadowBlur: 0,
+            shadowSpread: 0,
+            boxShadow: 7,
+            bgOpacity: 0.35,
+            borderOpacity: 0.23,
+            borderWidth: 0,
+            textColor: '#00ff88',
+            borderColor: '#00ffa0',
+            fontSize: 22,
+            perspective: 900
+        };
+
+        // Setup control sliders
+        function setupControls() {
+            const controls = {
+                'shadow-blur': (v) => { params.shadowBlur = v; updatePanels(); },
+                'shadow-spread': (v) => { params.shadowSpread = v; updatePanels(); },
+                'box-shadow': (v) => { params.boxShadow = v; updatePanels(); },
+                'bg-opacity': (v) => { params.bgOpacity = v / 100; updatePanels(); },
+                'border-opacity': (v) => { params.borderOpacity = v / 100; updatePanels(); },
+                'border-width': (v) => { params.borderWidth = v; updatePanels(); },
+                'text-color': (v) => { params.textColor = v; updatePanels(); },
+                'border-color': (v) => { params.borderColor = v; updatePanels(); },
+                'font-size': (v) => { params.fontSize = v; updatePanels(); },
+                'perspective': (v) => { params.perspective = v; cards.style.perspective = `${v}px`; }
+            };
+
+            Object.keys(controls).forEach(id => {
+                const el = document.getElementById(id);
+                const valEl = document.getElementById(`val-${id}`);
+
+                el.addEventListener('input', (e) => {
+                    const val = e.target.value;
+                    if (valEl) {
+                        if (id === 'bg-opacity' || id === 'border-opacity') {
+                            valEl.textContent = (val / 100).toFixed(2);
+                        } else {
+                            valEl.textContent = val;
+                        }
+                    }
+                    controls[id](val);
+                });
+            });
+
+            document.getElementById('toggle-controls').addEventListener('click', () => {
+                document.getElementById('controls').classList.toggle('controls-hidden');
+            });
+
+            document.getElementById('enable-depth-occlusion').addEventListener('change', (e) => {
+                depthOcclusionEnabled = e.target.checked;
+                mode3dEl.textContent = depthOcclusionEnabled ? `Active (${gridW}x${gridH})` : 'Disabled';
+            });
+        }
+
+        function updatePanels() {
+            panels.forEach(el => {
+                el.style.background = `rgba(0, 0, 0, ${params.bgOpacity})`;
+                el.style.border = `${params.borderWidth}px solid rgba(${hexToRgb(params.borderColor)}, ${params.borderOpacity})`;
+                el.style.color = params.textColor;
+                el.style.fontSize = `${params.fontSize}px`;
+                if (params.shadowBlur > 0 || params.shadowSpread > 0) {
+                    el.style.textShadow = `0 0 ${params.shadowBlur}px ${params.textColor}, 0 0 ${params.shadowSpread}px ${params.textColor}`;
+                } else {
+                    el.style.textShadow = 'none';
+                }
+                el.style.boxShadow = `0 10px ${params.boxShadow}px rgba(0, 0, 0, 0.5)`;
+            });
+        }
+
+        function hexToRgb(hex) {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `${r}, ${g}, ${b}`;
+        }
+
+        function imgToScreen(x, y) {
+            const vw = wrap.clientWidth, vh = wrap.clientHeight;
+            const s = Math.min(vw / imgW, vh / imgH);
+            const dispW = imgW * s, dispH = imgH * s;
+            const offX = (vw - dispW) / 2, offY = (vh - dispH) / 2;
+            return [offX + x * s, offY + y * s];
+        }
+
+        function orderCorners(pts) {
+            pts = pts.slice();
+            pts.sort((p, q) => (p[1] - q[1]) || (p[0] - q[0]));
+            const tl = pts[0], tr = pts[1];
+            const bl = pts[2], br = pts[3];
+            const top = (tl[0] < tr[0]) ? [tl, tr] : [tr, tl];
+            const bottom = (bl[0] < br[0]) ? [bl, br] : [br, bl];
+            return [top[0], top[1], bottom[1], bottom[0]];
+        }
+
+        function cssMatrixForQuad(xy, w = 260, h = 140) {
+            const x0 = xy[0][0], y0 = xy[0][1];
+            const x1 = xy[1][0], y1 = xy[1][1];
+            const x2 = xy[2][0], y2 = xy[2][1];
+            const x3 = xy[3][0], y3 = xy[3][1];
+
+            const dx1 = x1 - x2, dy1 = y1 - y2;
+            const dx2 = x3 - x2, dy2 = y3 - y2;
+            const sx = x0 - x1 + x2 - x3;
+            const sy = y0 - y1 + y2 - y3;
+
+            const g = (sx * dy2 - dx2 * sy) / (dx1 * dy2 - dy1 * dx2);
+            const h2 = (dx1 * sy - sx * dy1) / (dx1 * dy2 - dy1 * dx2);
+
+            let a = x1 - x0 + g * x1;
+            let b = x3 - x0 + h2 * x3;
+            let c = x0;
+            let d = y1 - y0 + g * y1;
+            let e = y3 - y0 + h2 * y3;
+            let f = y0;
+            let g1 = g, h1 = h2;
+
+            a /= w; b /= h; d /= w; e /= h; g1 /= w; h1 /= h;
+
+            return `matrix3d(${a}, ${d}, 0, ${g1}, ${b}, ${e}, 0, ${h1}, 0, 0, 1, 0, ${c}, ${f}, 0, 1)`;
+        }
+
+        // Socket.IO connection
+        const socket = io(window.location.origin, {
+            path: '/socket.io',
+            transports: ['polling', 'websocket'],
+            reconnection: true
+        });
+
+        socket.on('connect', () => {
+            console.log('✅ Connected to server');
+            status.textContent = '✅ Connected';
+            status.className = 'status-connected';
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.log('❌ Disconnected:', reason);
+            status.textContent = `❌ Disconnected: ${reason}`;
+            status.className = 'status-disconnected';
+        });
+
         // Enhanced socket handler with depth info
         socket.on('gemini_result', (result) => {
             console.log('📡 Gemini result received:', result);
@@ -612,6 +754,7 @@
         }
         addEventListener('resize', onResize);
 
+        // Initialize controls and start render loop
         setupControls();
         console.log('✅ 3D Depth-Aware Overlay system initialized');
     </script>

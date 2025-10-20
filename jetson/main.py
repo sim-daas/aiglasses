@@ -302,8 +302,8 @@ class AURAGlasses:
                     # Use only left camera for display
                     display_frame = frame_left.copy()
                     
-                    # Compute depth map for tape measure
-                    if self.use_tape_measure and frame_right is not None:
+                    # Compute depth map for tape measure (only if enabled and frame_right exists)
+                    if self.use_tape_measure and self.tape_measure and frame_right is not None:
                         self.tape_measure.compute_depth(frame_left, frame_right)
                     
                     # Process gesture keyboard if enabled
@@ -332,8 +332,8 @@ class AURAGlasses:
                             if query:
                                 self.process_gesture_query(query)
                     
-                    # Draw tape measure overlay if enabled
-                    if self.use_tape_measure:
+                    # Draw tape measure overlay if enabled (check for None)
+                    if self.use_tape_measure and self.tape_measure:
                         display_frame = self.tape_measure.draw_overlay(display_frame)
                     
                     # Add frame counter
