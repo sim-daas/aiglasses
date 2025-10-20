@@ -160,9 +160,17 @@ socket.on('gemini_result', (result) => {
     answerEl.textContent = result.answer;
     answerEl.style.display = 'block';
 
-    // Create 3D text at detected position
+    // Create 3D text at detected position with proper depth
     if (result.position) {
-        create3DText(result.answer, result.position);
+        const position = {
+            x: result.position.x,
+            y: result.position.y,
+            z: result.position.z || 0.5  // Use stereo depth if available
+        };
+        
+        console.log(`Creating 3D text at normalized position: (${position.x.toFixed(3)}, ${position.y.toFixed(3)}, ${position.z.toFixed(3)})`);
+        
+        create3DText(result.answer, position);
     }
 
     // Hide after 5 seconds

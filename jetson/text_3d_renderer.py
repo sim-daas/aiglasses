@@ -61,8 +61,8 @@ class Text3DRenderer:
         Args:
             cv_image: OpenCV BGR image
             text: String to render
-            position: (x, y) tuple
-            z_depth: Depth value for scaling and effects
+            position: (x, y) tuple in pixels
+            z_depth: Depth value for scaling (higher = closer/larger)
         
         Returns:
             OpenCV image with 3D text overlay
@@ -74,14 +74,16 @@ class Text3DRenderer:
         img_pil = Image.fromarray(cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB))
         x, y = position
         
-        # Calculate depth-based scaling
+        # Calculate perspective scaling based on depth
+        # z_depth typically ranges from 5 (far/small) to 20 (near/large)
         k_factor = self.params.get('scale_factor', 100.0)
-        calculated_scale = k_factor / (z_depth + 1e-3)
+        scale_multiplier = z_depth / 10.0  # Normalize around 1.0
+        calculated_scale = k_factor * scale_multiplier
         
-        # Final font size
+        # Final font size with bounds
         base_font_size = self.params.get('font_size', 48)
         final_font_size = int(base_font_size * calculated_scale / 100.0)
-        final_font_size = max(12, min(100, final_font_size))
+        final_font_size = max(16, min(120, final_font_size))  # Clamp to readable range
         
         # Load font
         try:
@@ -93,6 +95,14 @@ class Text3DRenderer:
         bbox = font.getbbox(text)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
+        
+        # Adjust position to center text
+        x = x - text_width // 2
+        y = y - text_height // 2
+        
+        # Ensure text stays within bounds
+        x = max(10, min(img_pil.width - text_width - 10, x))
+        y = max(10, min(img_pil.height - text_height - 10, y))
         
         # Create overlay
         overlay = Image.new('RGBA', (img_pil.width, img_pil.height), (0, 0, 0, 0))
@@ -120,7 +130,7 @@ class Text3DRenderer:
             200
         )
         
-        # Auto shadow direction
+        # Calculate shadow offset based on depth and position
         if self.params.get('auto_shadow_direction', True):
             shadow_x, shadow_y = self.calculate_auto_shadow_direction(
                 x, y, img_pil.width, img_pil.height, z_depth
@@ -134,29 +144,33 @@ class Text3DRenderer:
             draw.text((x + shadow_x, y + shadow_y), text, font=font, fill=shadow_color)
         
         # Draw depth layers (THIS IS THE KEY 3D EFFECT)
+        # More layers = more pronounced 3D effect
         if self.params.get('enable_depth', True):
-            depth_layers = min(8, int(z_depth))
+            depth_layers = max(3, min(12, int(z_depth * 0.8)))  # Scale layers with depth
+            layer_step = max(1, int(3 * scale_multiplier))  # Adjust step size
+            
             for i in range(depth_layers, 0, -1):
-                depth_x = x - i * 2
-                depth_y = y - i * 2
-                depth_alpha = int(120 * (depth_layers - i + 1) / depth_layers)
+                depth_x = x - i * layer_step
+                depth_y = y - i * layer_step
+                depth_alpha = int(140 * (depth_layers - i + 1) / depth_layers)
                 layer_color = (depth_color[0], depth_color[1], depth_color[2], depth_alpha)
                 draw.text((depth_x, depth_y), text, font=font, fill=layer_color)
         
         # Draw outline
         if self.params.get('enable_outline', True):
             outline_color = (0, 0, 0, 255)
-            for dx in [-1, 0, 1]:
-                for dy in [-1, 0, 1]:
+            outline_width = max(1, int(2 * scale_multiplier))
+            for dx in range(-outline_width, outline_width + 1):
+                for dy in range(-outline_width, outline_width + 1):
                     if dx != 0 or dy != 0:
                         draw.text((x + dx, y + dy), text, font=font, fill=outline_color)
         
-        # Draw main text
+        # Draw main text with glow effect
         draw.text((x, y), text, font=font, fill=text_color)
         
-        # Apply blur to shadow
+        # Apply blur to create depth-of-field effect (optional)
         shadow_blur = self.params.get('shadow_blur', 0)
-        if self.params.get('enable_shadow', True) and shadow_blur > 0:
+        if shadow_blur > 0:
             overlay = overlay.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
         
         # Convert back and blend

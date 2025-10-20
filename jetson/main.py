@@ -30,7 +30,7 @@ from audio_manager import AudioManager
 from gemini_client import GeminiClient
 from web_server import WebServer
 from config import Config
-from opengl_text_renderer import OpenGLTextRenderer
+from text_3d_renderer import Text3DRenderer  # Use PIL-based renderer
 
 class AURAGlasses:
     def __init__(self, test_mode=False):
@@ -60,12 +60,9 @@ class AURAGlasses:
         self.test_mode = test_mode
         self.current_result = None  # Store latest result for overlay
         
-        # Initialize OpenGL 3D text renderer instead of PIL-based one
-        logger.info("Initializing OpenGL 3D text renderer...")
-        self.text_renderer = OpenGLTextRenderer(
-            frame_width=Config.SINGLE_CAM_WIDTH,
-            frame_height=Config.SINGLE_CAM_HEIGHT
-        )
+        # Initialize PIL-based 3D text renderer with depth-aware scaling
+        logger.info("Initializing 3D text renderer...")
+        self.text_renderer = Text3DRenderer()
         
         logger.info("✅ AURA AI Glasses initialized!")
         
@@ -252,59 +249,71 @@ class AURAGlasses:
         return location_map.get(location, (int(frame_width * 0.5), int(frame_height * 0.5)))
     
     def _draw_3d_text_overlay(self, frame, result):
-        """Draw TRUE 3D text with depth using OpenGL"""
+        """Draw 3D text with proper depth-based perspective scaling"""
         if not result:
             return frame
         
         h, w = frame.shape[:2]
         
-        # Get location from Gemini
-        location = result.get('location', 'center')
-        location_map = {
-            'top-left': (0.15, 0.15),
-            'top-center': (0.5, 0.15),
-            'top-right': (0.85, 0.15),
-            'center-left': (0.15, 0.5),
-            'center': (0.5, 0.5),
-            'center-right': (0.85, 0.5),
-            'bottom-left': (0.15, 0.85),
-            'bottom-center': (0.5, 0.85),
-            'bottom-right': (0.85, 0.85),
-        }
+        # Get Gemini's normalized coordinates (0-1 range)
+        gemini_x = result.get('position', {}).get('x', 0.5)
+        gemini_y = result.get('position', {}).get('y', 0.5)
+        depth_normalized = result.get('position', {}).get('z', 0.5)  # From stereo
         
-        rel_x, rel_y = location_map.get(location, (0.5, 0.5))
-        pixel_x = int(rel_x * w)
-        pixel_y = int(rel_y * h)
+        # Convert to pixel coordinates
+        pixel_x = int(gemini_x * w)
+        pixel_y = int(gemini_y * h)
         
-        # Get depth from stereo (normalized 0-1)
-        depth_normalized = result.get('position', {}).get('z', 0.5)
+        # Calculate z_depth for perspective scaling
+        # Near objects (depth close to 0) = larger text (high z_depth value)
+        # Far objects (depth close to 1) = smaller text (low z_depth value)
+        z_depth = 5.0 + (1.0 - depth_normalized) * 15.0  # Range: 5 to 20
         
-        # Convert to meters (assume 0.5-3.0 meter range)
-        depth_meters = 0.5 + depth_normalized * 2.5
-        
-        # Calculate 3D world position
-        world_pos = self.text_renderer.world_position_from_depth(
-            pixel_x, pixel_y, depth_meters
-        )
-        
-        # Render answer text with 3D depth
+        # Get text content
         answer = result['answer']
+        object_name = result['object']
+        
+        logger.info(f"📍 Rendering 3D text:")
+        logger.info(f"   Position: ({pixel_x}, {pixel_y})")
+        logger.info(f"   Depth: {depth_normalized:.3f} -> z_depth: {z_depth:.2f}")
+        logger.info(f"   Text: '{answer[:50]}...'")
+        
+        # Render main answer with 3D effect
         frame = self.text_renderer.render_3d_text(
             frame,
             answer,
-            world_pos,
-            size=0.3  # Size in meters
+            (pixel_x, pixel_y),
+            z_depth=z_depth
         )
         
-        # Render label below
-        object_name = result['object']
-        label_world_pos = (world_pos[0], world_pos[1] - 0.2, world_pos[2])
+        # Render object label below with smaller scale
+        label_y = pixel_y + int(30 * (z_depth / 10.0))  # Proportional spacing
         frame = self.text_renderer.render_3d_text(
             frame,
             f"[{object_name}]",
-            label_world_pos,
-            size=0.15
+            (pixel_x, label_y),
+            z_depth=z_depth * 0.6  # Smaller label
         )
+        
+        # Draw positioning indicator (crosshair)
+        indicator_size = max(3, int(10 * (z_depth / 10.0)))
+        cv2.circle(frame, (pixel_x, pixel_y - 15), indicator_size, (0, 255, 0), -1)
+        cv2.circle(frame, (pixel_x, pixel_y - 15), indicator_size + 2, (255, 255, 255), 1)
+        
+        # Draw depth indicator bar
+        depth_bar_x = pixel_x - 50
+        depth_bar_y = pixel_y - 30
+        depth_bar_width = 100
+        depth_bar_height = 5
+        cv2.rectangle(frame, 
+                     (depth_bar_x, depth_bar_y),
+                     (depth_bar_x + depth_bar_width, depth_bar_y + depth_bar_height),
+                     (100, 100, 100), -1)
+        filled_width = int(depth_bar_width * depth_normalized)
+        cv2.rectangle(frame,
+                     (depth_bar_x, depth_bar_y),
+                     (depth_bar_x + filled_width, depth_bar_y + depth_bar_height),
+                     (0, 255, 0), -1)
         
         return frame
     

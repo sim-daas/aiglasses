@@ -60,7 +60,18 @@ Complete pipeline combining stereo vision, voice recognition, AI vision analysis
 - `owl_predict.py` - NanoOwl object detection
 - `depth.py` - Stereo depth calculation
 - `detect.py` - Detection visualization
-- `3dtext.py` - 3D text effects
+- `text_3d_renderer.py` - PIL-based 3D text rendering with depth scaling
+
+## 3D Text Overlay System
+
+The system renders 3D text at the correct spatial location using:
+- **Gemini's x,y coordinates** - Normalized (0-1) position from vision AI
+- **Stereo depth map** - Real depth (z) from dual cameras
+- **Perspective scaling** - Objects farther away appear smaller
+- **Depth layers** - Multiple offset layers create 3D appearance
+- **Automatic shadows** - Direction based on position in frame
+
+No physical markers needed - uses virtual 3D positioning!
 
 ## Requirements
 
